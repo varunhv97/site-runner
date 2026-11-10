@@ -15,7 +15,7 @@ Live at [spinsite.vercel.app](https://spinsite.vercel.app).
 ## Stack
 
 Next.js 16 (the tool at `/app`), a static landing page at `/` (`public/index.html`, built with the
-taste-skill kit in `public/assets`), FastAPI as a Vercel Python function (`api/`), a private Vercel Blob store for files and metadata.
+taste-skill kit in `public/assets`), FastAPI as a Vercel Python function (`api/`), Postgres (Neon) for metadata and a private Vercel Blob store for files.
 See [architecture.md](architecture.md).
 
 ## Local development
@@ -25,7 +25,7 @@ python3 -m venv venv && source venv/bin/activate
 pip3 install -r requirements-dev.txt
 npm install
 cp .env.example .env.auth.local      # optional: fill in Google keys to turn on sign-in
-npm run dev:api                      # FastAPI on :8000 (files go to ./.data)
+npm run dev:api                      # FastAPI on :8000 (SQLite + files in ./.data)
 npm run dev                          # Next.js on :3000, proxies /api and /s to :8000
 ```
 
@@ -45,6 +45,7 @@ All settings are environment variables; see [.env.example](.env.example).
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google sign-in. Unset: sign-in off (anonymous shares locally, no shares in production) |
 | `SESSION_SECRET` | Signs the session cookie |
 | `ADMIN_EMAILS` | Emails allowed to unpublish any site |
+| `DATABASE_URL` | Postgres (set by the Neon integration). Unset locally: SQLite in `./.data` |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob; set automatically when a store is connected |
 | `BLOB_ACCESS` | `private` (default) or `public`, matching the store |
 | `CRON_SECRET` | Guards the daily cleanup job (`vercel.json` cron) |
@@ -76,5 +77,4 @@ site, 100 uploads per account per day. Hidden files (`.git`, `.env`, ...) are dr
 
 - Local previews run on the app's origin, so a malicious zip you preview yourself could read tokens stored in
   your browser. Shared links are sandboxed. Fix: serve previews from a separate origin.
-- Site metadata is a JSON file per site; two writes to one site at the same instant can lose one.
 - Unpublished sites' files are deleted by the daily cleanup job once no other site uses them.

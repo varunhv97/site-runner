@@ -15,7 +15,11 @@
 
 - [x] Production hardening: hidden-file skip, unpublish, token rotation, admin takedown, limits, security headers, CI, README, .env.example
 
+- [x] Metadata in Postgres (SQLite locally), files in a private Blob store, daily cleanup cron
+
 ## Next
+- [ ] Connect Neon + private Blob store in Vercel, set CRON_SECRET, then verify on production
+- [ ] Add Alembic migrations before the first schema change
 - [ ] Pre-share warning + secret scan (API keys in JS); optional expiry for old shares
 - [ ] "Your shared sites" list in /app (server side exists: /api/me/sites)
 - [ ] Report-abuse link and contact address
@@ -23,6 +27,4 @@
 - [ ] MCP server (Python FastMCP): create_site, upload_version, list_versions, set_live, diff_versions
 - [ ] Serve shared content from a separate domain (stronger isolation, allows localStorage in shared sites)
 - [ ] Local preview runs same-origin as the app. Use a separate preview origin to isolate untrusted zips
-- [ ] Garbage-collect orphaned local files after delete
-- [ ] meta.json read-modify-write isn't concurrency-safe (fine for single editor)
 - [ ] Larger uploads: client-direct Blob uploads to bypass the 4.5MB function limit
