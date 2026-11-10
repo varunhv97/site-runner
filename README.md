@@ -15,7 +15,7 @@ Live at [spinsite.vercel.app](https://spinsite.vercel.app).
 ## Stack
 
 Next.js 16 (the tool at `/app`), a static landing page at `/` (`public/index.html`, built with the
-taste-skill kit in `public/assets`), FastAPI as a Vercel Python function (`api/`), Vercel Blob for storage.
+taste-skill kit in `public/assets`), FastAPI as a Vercel Python function (`api/`), a private Vercel Blob store for files and metadata.
 See [architecture.md](architecture.md).
 
 ## Local development
@@ -46,6 +46,8 @@ All settings are environment variables; see [.env.example](.env.example).
 | `SESSION_SECRET` | Signs the session cookie |
 | `ADMIN_EMAILS` | Emails allowed to unpublish any site |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob; set automatically when a store is connected |
+| `BLOB_ACCESS` | `private` (default) or `public`, matching the store |
+| `CRON_SECRET` | Guards the daily cleanup job (`vercel.json` cron) |
 
 Google OAuth client: a Web application with redirect URIs `http://localhost:3000/api/auth/callback`
 and `https://<your domain>/api/auth/callback`.
@@ -75,4 +77,4 @@ site, 100 uploads per account per day. Hidden files (`.git`, `.env`, ...) are dr
 - Local previews run on the app's origin, so a malicious zip you preview yourself could read tokens stored in
   your browser. Shared links are sandboxed. Fix: serve previews from a separate origin.
 - Site metadata is a JSON file per site; two writes to one site at the same instant can lose one.
-- Unpublishing keeps the files in storage (they are content-addressed and may be shared between sites).
+- Unpublished sites' files are deleted by the daily cleanup job once no other site uses them.

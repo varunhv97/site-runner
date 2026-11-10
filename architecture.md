@@ -41,7 +41,10 @@ Vercel ─── api/index.py (FastAPI)
 ## Storage layout (server)
 - `sites/<id>/meta.json`: `{id, name, token_hash, live, versions:[{n, created_at, note, entry, size, manifest{path:sha}}]}`
 - `blobs/<sha256>`: file bytes
-- Storage backend picked by env: `BLOB_READ_WRITE_TOKEN` → Vercel Blob, else `LOCAL_DATA_DIR` (default `.data`).
+- Storage backend picked by env: `BLOB_READ_WRITE_TOKEN` → Vercel Blob (`BLOB_ACCESS`, default private), else `LOCAL_DATA_DIR` (default `.data`).
+- Private store: every read carries the token; nothing is reachable except through `/s/...` and the API.
+  Metadata reads use `?cache=0` (overwritten keys); file reads use the CDN cache (files never change).
+- Cleanup: Vercel Cron calls `/api/cron/cleanup` daily (CRON_SECRET); deletes `blobs/*` no site version uses, older than 1 hour.
 
 ## Local data (IndexedDB `site-runner` v1)
 - `sites` (keyPath id): LocalSite incl. `versions[].manifest` and optional `remote {siteId, token, url, live, pushed}`
