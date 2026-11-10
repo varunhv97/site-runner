@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+venv/
+.data/
+__pycache__/
+.pytest_cache/
+.taste-skill/
+shots/
+public/.taste-skill/
+!.env.example

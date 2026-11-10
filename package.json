@@ -6,9 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "dev:api": "set -a; [ -f .env.auth.local ] && . ./.env.auth.local; set +a; uvicorn api.index:app --reload --port 8000",
+    "test": "pytest -q"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
+    "idb": "^8.0.4",
     "next": "16.4.5",
     "react": "19.3.0",
     "react-dom": "19.3.0"

@@ -1,0 +1,17 @@
+[project]
+name = "site-runner-api"
+version = "0.1.0"
+requires-python = ">=3.12"
+# Vercel installs from here when pyproject.toml exists; keep in sync with requirements.txt.
+dependencies = [
+    "fastapi==0.162.2",
+    "python-multipart==0.0.33",
+    "httpx==0.28.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "api", "tests"]
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 120
