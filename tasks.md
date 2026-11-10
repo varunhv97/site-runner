@@ -15,10 +15,12 @@
 
 - [x] Production hardening: hidden-file skip, unpublish, token rotation, admin takedown, limits, security headers, CI, README, .env.example
 
-- [x] Metadata in Postgres (SQLite locally), files in a private Blob store, daily cleanup cron
+- [x] Metadata in Postgres (SQLite locally), files in a private Blob store (OIDC), daily cleanup cron; verified against real Neon + Blob and live on spinsite
 
 ## Next
-- [ ] Connect Neon + private Blob store in Vercel, set CRON_SECRET, then verify on production
+- [ ] Set CRON_SECRET in Vercel (cleanup cron returns 401 until then)
+- [ ] Delete the old public store `site-runner-blob` (test data only)
+- [ ] Use a separate Neon branch for Development (it currently shares the production database)
 - [ ] Add Alembic migrations before the first schema change
 - [ ] Pre-share warning + secret scan (API keys in JS); optional expiry for old shares
 - [ ] "Your shared sites" list in /app (server side exists: /api/me/sites)
