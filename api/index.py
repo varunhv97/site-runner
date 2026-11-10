@@ -95,8 +95,20 @@ def _check_origin(request: Request) -> None:
 
 
 @app.get("/api/health")
-async def health():
-    return {"ok": True, "storage": type(sites.storage).__name__, "database": sites.engine.dialect.name}
+async def health(request: Request):
+    """Liveness plus whether storage credentials are usable (true/false only, never the values)."""
+    storage_ok = True
+    try:
+        await sites.storage.get("health/probe")
+    except StorageError:
+        storage_ok = False
+    return {
+        "ok": True,
+        "storage": type(sites.storage).__name__,
+        "storage_reachable": storage_ok,
+        "oidc_header": "x-vercel-oidc-token" in request.headers,
+        "database": sites.engine.dialect.name,
+    }
 
 
 # ---- Google sign-in ----
