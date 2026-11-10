@@ -3,6 +3,7 @@
 Runs as a Vercel Python function in prod; `uvicorn api.index:app --port 8000` in dev.
 """
 
+import hmac
 import logging
 import os
 import sys
@@ -242,6 +243,17 @@ async def claim_site(request: Request, site_id: str, authorization: str | None =
 @app.get("/api/sites/{site_id}")
 async def get_site(site_id: str):
     return {"site": public_meta(await sites.load_meta(site_id))}
+
+
+@app.get("/api/cron/cleanup")
+async def cron_cleanup(authorization: str | None = Header(None)):
+    """Daily Vercel Cron job (vercel.json). Vercel sends "Authorization: Bearer $CRON_SECRET"."""
+    secret = os.environ.get("CRON_SECRET")
+    if not secret or not authorization or not hmac.compare_digest(authorization, f"Bearer {secret}"):
+        raise SiteError("not allowed", 401)
+    result = await sites.cleanup()
+    log.info("cleanup: %s", result)
+    return result
 
 
 # ---- Serving shared sites ----

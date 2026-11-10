@@ -126,7 +126,7 @@ class Sites:
     async def load_meta(self, site_id: str) -> dict:
         if not site_id.isalnum():
             raise SiteError("site not found", 404)
-        raw = await self.storage.get(self._meta_key(site_id))
+        raw = await self.storage.get(self._meta_key(site_id), fresh=True)
         if raw is None:
             raise SiteError("site not found", 404)
         meta = json.loads(raw)
@@ -150,7 +150,7 @@ class Sites:
         return f"users/{hashlib.sha256(sub.encode()).hexdigest()}.json"
 
     async def _load_user(self, sub: str) -> dict:
-        raw = await self.storage.get(self._user_key(sub))
+        raw = await self.storage.get(self._user_key(sub), fresh=True)
         doc = json.loads(raw) if raw else {}
         return {"sites": doc.get("sites", []), "day": doc.get("day", ""), "uploads": doc.get("uploads", 0)}
 
@@ -271,6 +271,28 @@ class Sites:
         meta["token_hash"] = _hash_token(new)
         await self._save_meta(meta)
         return new
+
+    async def cleanup(self, min_age_seconds: int = 3600) -> dict:
+        """Delete stored files that no live or unpublished-but-kept site version uses.
+
+        Files younger than min_age_seconds are kept: an upload writes its files before its metadata,
+        so a brand-new file may not be referenced yet."""
+        referenced: set[str] = set()
+        metas = [key for key, _ in await self.storage.list("sites/") if key.endswith("/meta.json")]
+        for key in metas:
+            raw = await self.storage.get(key, fresh=True)
+            meta = json.loads(raw) if raw else {}
+            for version in meta.get("versions", []):
+                referenced.update(version["manifest"].values())
+        now = time.time()
+        orphans = [
+            key
+            for key, uploaded in await self.storage.list("blobs/")
+            if key.removeprefix("blobs/") not in referenced and now - uploaded > min_age_seconds
+        ]
+        if orphans:
+            await self.storage.delete(orphans)
+        return {"sites": len(metas), "files_referenced": len(referenced), "files_deleted": len(orphans)}
 
     async def read_file(self, version: dict, path: str) -> bytes | None:
         digest = version["manifest"].get(path)

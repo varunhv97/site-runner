@@ -101,3 +101,26 @@ def test_hidden_files_are_skipped(client):
     assert client.get(f"/s/{sid}/css/a.css").status_code == 200
     for hidden in (".env", ".git/config", "css/.DS_Store"):
         assert client.get(f"/s/{sid}/{hidden}").status_code == 404
+
+
+def test_cleanup_deletes_only_unused_old_files(client, tmp_path, monkeypatch):
+    import os
+    import time
+
+    keep = create(client, {"index.html": "kept"})["site"]["id"]
+    gone = create(client, {"index.html": "gone", "only-here.css": "x"})
+    gone_id = gone["site"]["id"]
+    client.delete(f"/api/sites/{gone_id}", headers={"Authorization": f"Bearer {gone['edit_token']}"})
+    blobs = tmp_path / "blobs"
+    old = time.time() - 7200
+    for f in blobs.iterdir():
+        os.utime(f, (old, old))
+    (blobs / "fresh-upload").write_bytes(b"in flight")  # young: must survive
+
+    assert client.get("/api/cron/cleanup").status_code == 401
+    monkeypatch.setenv("CRON_SECRET", "s3cret")
+    assert client.get("/api/cron/cleanup", headers={"Authorization": "Bearer wrong"}).status_code == 401
+    r = client.get("/api/cron/cleanup", headers={"Authorization": "Bearer s3cret"})
+    assert r.status_code == 200 and r.json()["files_deleted"] == 2  # "gone" and "only-here.css"
+    assert client.get(f"/s/{keep}/").text == "kept"
+    assert (blobs / "fresh-upload").exists()
