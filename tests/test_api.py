@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 import api.index as server
 from _core.sites import Sites  # same module objects api.index uses
+from _core.db import make_engine
 from _core.storage import LocalStorage
 
 
@@ -19,7 +20,7 @@ def make_zip(files: dict[str, str]) -> bytes:
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "sites", Sites(LocalStorage(str(tmp_path))))
+    monkeypatch.setattr(server, "sites", Sites(LocalStorage(str(tmp_path)), make_engine(f"sqlite:///{tmp_path}/t.db")))
     return TestClient(server.app)
 
 

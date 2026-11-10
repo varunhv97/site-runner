@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 import api.index as server
 from _core import auth
 from _core.sites import Sites
+from _core.db import make_engine
 from _core.storage import LocalStorage
 from test_api import make_zip
 
@@ -19,7 +20,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "cid")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "csecret")
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setattr(server, "sites", Sites(LocalStorage(str(tmp_path))))
+    monkeypatch.setattr(server, "sites", Sites(LocalStorage(str(tmp_path)), make_engine(f"sqlite:///{tmp_path}/t.db")))
     return TestClient(server.app)
 
 

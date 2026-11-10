@@ -13,16 +13,18 @@ sys.path.insert(0, os.path.dirname(__file__))
 from fastapi import FastAPI, File, Form, Header, Request, UploadFile  # noqa: E402
 from fastapi.responses import JSONResponse, RedirectResponse, Response  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
+from sqlalchemy.exc import OperationalError  # noqa: E402
 
 from _core import auth  # noqa: E402
-from _core.sites import SiteError, Sites, content_type, public_meta  # noqa: E402
+from _core.db import make_engine  # noqa: E402
+from _core.sites import SiteError, Sites, content_type  # noqa: E402
 from _core.storage import StorageError, make_storage  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("site-runner")
 
 app = FastAPI(title="Site Runner", docs_url=None, redoc_url=None, openapi_url=None)
-sites = Sites(make_storage())
+sites = Sites(make_storage(), make_engine())
 
 # Shared content runs with an opaque origin: it can't read this app's cookies/storage.
 SANDBOX_CSP = "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock"
@@ -37,6 +39,12 @@ async def site_error_handler(_: Request, exc: SiteError):
 async def storage_error_handler(_: Request, exc: StorageError):
     log.error("storage error: %s", exc)
     return JSONResponse({"error": "Storage is unavailable right now. Try again in a minute."}, status_code=502)
+
+
+@app.exception_handler(OperationalError)
+async def database_error_handler(_: Request, exc: OperationalError):
+    log.error("database error: %s", exc)
+    return JSONResponse({"error": "The database is unavailable right now. Try again in a minute."}, status_code=503)
 
 
 @app.exception_handler(Exception)
@@ -80,7 +88,7 @@ def _check_origin(request: Request) -> None:
 
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "storage": type(sites.storage).__name__}
+    return {"ok": True, "storage": type(sites.storage).__name__, "database": sites.engine.dialect.name}
 
 
 # ---- Google sign-in ----
@@ -113,6 +121,7 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         user = await auth.fetch_google_user(code, f"{_base_url(request)}/api/auth/callback")
     except auth.AuthError:
         return RedirectResponse("/app?signin=failed", status_code=302)
+    await sites.touch_user(user)
     res = RedirectResponse(saved["next"], status_code=302)
     res.delete_cookie(auth.STATE_COOKIE, path="/api/auth")
     res.set_cookie(
@@ -146,14 +155,7 @@ async def my_sites(request: Request):
     user = _current_user(request)
     if not user:
         raise SiteError("sign in to list your sites", 401)
-    found = []
-    for site_id in await sites.list_user_sites(user["sub"]):
-        try:
-            meta = await sites.load_meta(site_id)
-        except SiteError:
-            continue
-        found.append(public_meta(meta) | {"url": _share_url(request, site_id)})
-    return {"sites": found}
+    return {"sites": [meta | {"url": _share_url(request, meta["id"])} for meta in await sites.user_sites(user["sub"])]}
 
 
 # ---- Sites ----
@@ -175,7 +177,7 @@ async def create_site(
         raise SiteError("Sharing opens once Google sign-in is set up on this site", 503)
     meta, token = await sites.create(name, await file.read(), note, owner=user)
     return {
-        "site": public_meta(meta),
+        "site": meta,
         "edit_token": token,
         "url": _share_url(request, meta["id"]),
         "version_url": _share_url(request, meta["id"], meta["live"]),
@@ -195,7 +197,7 @@ async def add_version(
         site_id, _bearer(authorization), await file.read(), note, user=_current_user(request)
     )
     return {
-        "site": public_meta(meta),
+        "site": meta,
         "url": _share_url(request, site_id),
         "version_url": _share_url(request, site_id, meta["live"]),
     }
@@ -209,7 +211,7 @@ class LiveBody(BaseModel):
 async def set_live(request: Request, site_id: str, body: LiveBody, authorization: str | None = Header(None)):
     _check_origin(request)
     meta = await sites.set_live(site_id, _bearer(authorization), body.version, user=_current_user(request))
-    return {"site": public_meta(meta)}
+    return {"site": meta}
 
 
 @app.delete("/api/sites/{site_id}")
@@ -237,12 +239,12 @@ async def claim_site(request: Request, site_id: str, authorization: str | None =
     if not user:
         raise SiteError("sign in to claim a site", 401)
     meta = await sites.claim(site_id, _bearer(authorization), user)
-    return {"site": public_meta(meta)}
+    return {"site": meta}
 
 
 @app.get("/api/sites/{site_id}")
 async def get_site(site_id: str):
-    return {"site": public_meta(await sites.load_meta(site_id))}
+    return {"site": await sites.public_meta(site_id)}
 
 
 @app.get("/api/cron/cleanup")
@@ -272,18 +274,17 @@ async def serve_root_redirect(ref: str, request: Request):
 @app.api_route("/s/{ref}/{path:path}", methods=["GET", "HEAD"])
 async def serve(ref: str, path: str):
     site_id, _, vstr = ref.partition("@")
-    meta = await sites.load_meta(site_id)
     pinned = bool(vstr)
     try:
-        n = int(vstr) if pinned else meta["live"]
-        if n < 1:
-            raise IndexError
-        version = meta["versions"][n - 1]
-    except (ValueError, IndexError, TypeError):
+        n = int(vstr) if pinned else None
+    except ValueError:
+        return _not_found()
+    try:
+        version = await sites.resolve(site_id, n)
+    except SiteError:
         return _not_found()
 
     base = f"/s/{ref}/"
-    manifest = version["manifest"]
     if path == "":
         if "/" in version["entry"]:
             return RedirectResponse(base + version["entry"], status_code=307)
@@ -291,12 +292,13 @@ async def serve(ref: str, path: str):
     elif path.endswith("/"):
         path += "index.html"
 
-    if path not in manifest:
-        if f"{path}/index.html" in manifest:
+    digest = await sites.file_digest(site_id, version["n"], path)
+    if digest is None:
+        if await sites.file_digest(site_id, version["n"], f"{path}/index.html"):
             return RedirectResponse(f"{base}{path}/", status_code=308)
         return _not_found()
 
-    data = await sites.read_file(version, path)
+    data = await sites.read_blob(digest)
     if data is None:
         return _not_found()
     return Response(

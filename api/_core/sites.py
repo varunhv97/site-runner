@@ -1,9 +1,8 @@
-"""Site/version logic: zip validation, content-addressed file storage, metadata."""
+"""Site/version logic: zip validation, files in Blob storage (by sha256), metadata in the database."""
 
 import hashlib
 import hmac
 import io
-import json
 import mimetypes
 import os
 import posixpath
@@ -11,6 +10,12 @@ import secrets
 import string
 import time
 import zipfile
+
+from sqlalchemy import func, select, update
+from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.exc import IntegrityError
+
+from .db import create_schema, sites, uploads, users, version_files, versions
 
 MAX_ZIP_BYTES = 4 * 1024 * 1024  # Vercel function body limit is 4.5MB
 MAX_TOTAL_BYTES = 50 * 1024 * 1024  # zip-bomb guard (uncompressed)
@@ -116,174 +121,266 @@ def is_admin(user: dict | None) -> bool:
 
 
 class Sites:
-    def __init__(self, storage):
+    def __init__(self, storage, engine):
         self.storage = storage
+        self.engine = engine
+        self._schema_ready = False
 
-    @staticmethod
-    def _meta_key(site_id: str) -> str:
-        return f"sites/{site_id}/meta.json"
+    async def _ready(self) -> None:
+        if not self._schema_ready:
+            await create_schema(self.engine)
+            self._schema_ready = True
 
-    async def load_meta(self, site_id: str) -> dict:
+    def _upsert(self, table):
+        dialect = postgresql if self.engine.dialect.name == "postgresql" else sqlite
+        return dialect.insert(table)
+
+    # ---- users and limits ----
+
+    async def touch_user(self, user: dict) -> None:
+        """Record a signed-in user (email kept for admin and abuse handling)."""
+        await self._ready()
+        stmt = self._upsert(users).values(sub=user["sub"], email=user.get("email", ""), created_at=int(time.time()))
+        async with self.engine.begin() as conn:
+            await conn.execute(stmt.on_conflict_do_update(index_elements=["sub"], set_={"email": stmt.excluded.email}))
+
+    async def _count_upload(self, conn, user: dict | None) -> None:
+        """Atomically count a signed-in upload against today's limit."""
+        if not user:
+            return
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        stmt = self._upsert(uploads).values(sub=user["sub"], day=day, count=1)
+        stmt = stmt.on_conflict_do_update(index_elements=["sub", "day"], set_={"count": uploads.c.count + 1}).returning(
+            uploads.c.count
+        )
+        count = (await conn.execute(stmt)).scalar_one()
+        if count > MAX_UPLOADS_PER_DAY:
+            raise SiteError(f"daily upload limit reached ({MAX_UPLOADS_PER_DAY}); try again tomorrow", 429)
+
+    # ---- reading ----
+
+    async def _site(self, conn, site_id: str, lock: bool = False):
         if not site_id.isalnum():
             raise SiteError("site not found", 404)
-        raw = await self.storage.get(self._meta_key(site_id), fresh=True)
-        if raw is None:
+        q = select(sites).where(sites.c.id == site_id, sites.c.deleted_at.is_(None))
+        row = (await conn.execute(q.with_for_update() if lock else q)).first()
+        if row is None:
             raise SiteError("site not found", 404)
-        meta = json.loads(raw)
-        if meta.get("deleted"):
-            raise SiteError("site not found", 404)
-        return meta
+        return row
 
-    async def _save_meta(self, meta: dict) -> None:
-        await self.storage.put(self._meta_key(meta["id"]), json.dumps(meta).encode(), "application/json")
+    async def public_meta(self, site_id: str, conn=None) -> dict:
+        await self._ready()
+        if conn is None:
+            async with self.engine.connect() as c:
+                return await self.public_meta(site_id, c)
+        site = await self._site(conn, site_id)
+        rows = (await conn.execute(select(versions).where(versions.c.site_id == site_id).order_by(versions.c.n))).all()
+        return {
+            "id": site.id,
+            "name": site.name,
+            "live": site.live,
+            "versions": [
+                {
+                    "n": v.n,
+                    "created_at": v.created_at,
+                    "note": v.note,
+                    "entry": v.entry,
+                    "size": v.size,
+                    "files": v.files,
+                }
+                for v in rows
+            ],
+        }
 
-    def check_access(self, meta: dict, token: str | None, user: dict | None = None) -> None:
+    async def user_sites(self, sub: str) -> list[dict]:
+        await self._ready()
+        async with self.engine.connect() as conn:
+            ids = (
+                await conn.execute(
+                    select(sites.c.id)
+                    .where(sites.c.owner == sub, sites.c.deleted_at.is_(None))
+                    .order_by(sites.c.created_at)
+                )
+            ).scalars()
+            return [await self.public_meta(i, conn) for i in ids]
+
+    async def list_user_sites(self, sub: str) -> list[str]:
+        return [s["id"] for s in await self.user_sites(sub)]
+
+    async def resolve(self, site_id: str, n: int | None) -> dict:
+        """The version to serve: version n, or the live one. 404 when there is none."""
+        await self._ready()
+        async with self.engine.connect() as conn:
+            site = await self._site(conn, site_id)
+            n = site.live if n is None else n
+            row = (await conn.execute(select(versions).where(versions.c.site_id == site_id, versions.c.n == n))).first()
+        if row is None:
+            raise SiteError("version not found", 404)
+        return {"n": row.n, "entry": row.entry}
+
+    async def file_digest(self, site_id: str, n: int, path: str) -> str | None:
+        async with self.engine.connect() as conn:
+            q = select(version_files.c.digest).where(
+                version_files.c.site_id == site_id, version_files.c.n == n, version_files.c.path == path
+            )
+            return (await conn.execute(q)).scalar()
+
+    async def read_blob(self, digest: str) -> bytes | None:
+        return await self.storage.get(f"blobs/{digest}")
+
+    # ---- writing ----
+
+    def check_access(self, site, token: str | None, user: dict | None = None) -> None:
         """The site's owner (signed in) or anyone holding its edit token (API, MCP) may change it."""
-        if user and meta.get("owner") == user["sub"]:
+        if user and site.owner == user["sub"]:
             return
-        if token and hmac.compare_digest(_hash_token(token), meta["token_hash"]):
+        if token and hmac.compare_digest(_hash_token(token), site.token_hash):
             return
         raise SiteError("sign in as the site's owner or send its edit token", 403)
 
-    @staticmethod
-    def _user_key(sub: str) -> str:
-        return f"users/{hashlib.sha256(sub.encode()).hexdigest()}.json"
-
-    async def _load_user(self, sub: str) -> dict:
-        raw = await self.storage.get(self._user_key(sub), fresh=True)
-        doc = json.loads(raw) if raw else {}
-        return {"sites": doc.get("sites", []), "day": doc.get("day", ""), "uploads": doc.get("uploads", 0)}
-
-    async def _save_user(self, sub: str, doc: dict) -> None:
-        await self.storage.put(self._user_key(sub), json.dumps(doc).encode(), "application/json")
-
-    async def list_user_sites(self, sub: str) -> list[str]:
-        return (await self._load_user(sub))["sites"]
-
-    async def _add_user_site(self, sub: str, site_id: str) -> None:
-        doc = await self._load_user(sub)
-        if site_id not in doc["sites"]:
-            doc["sites"].append(site_id)
-        await self._save_user(sub, doc)
-
-    async def _count_upload(self, user: dict | None) -> None:
-        """Enforce the daily upload limit for signed-in uploads."""
-        if not user:
-            return
-        doc = await self._load_user(user["sub"])
-        today = time.strftime("%Y-%m-%d", time.gmtime())
-        if doc["day"] != today:
-            doc["day"], doc["uploads"] = today, 0
-        if doc["uploads"] >= MAX_UPLOADS_PER_DAY:
-            raise SiteError(f"daily upload limit reached ({MAX_UPLOADS_PER_DAY}); try again tomorrow", 429)
-        doc["uploads"] += 1
-        await self._save_user(user["sub"], doc)
-
-    async def _store_version(self, meta: dict, zip_bytes: bytes, note: str) -> dict:
+    async def _upload_files(self, zip_bytes: bytes) -> tuple[dict, str, int]:
+        """Validate the zip and put its files in storage. Returns (path -> digest, entry, total size).
+        Files are written before the metadata, so a version never points at a missing file."""
         files = extract_zip(zip_bytes)
         manifest = {}
         for path, data in files.items():
             digest = hashlib.sha256(data).hexdigest()
             manifest[path] = digest
             await self.storage.put(f"blobs/{digest}", data, content_type(path))
-        version = {
-            "n": len(meta["versions"]) + 1,
-            "created_at": int(time.time()),
-            "note": note[:200],
-            "entry": pick_entry(manifest),
-            "size": sum(len(b) for b in files.values()),
-            "manifest": manifest,
-        }
-        meta["versions"].append(version)
-        meta["live"] = version["n"]
-        await self._save_meta(meta)
-        return version
+        return manifest, pick_entry(manifest), sum(len(b) for b in files.values())
+
+    async def _add_version(self, conn, site_id: str, manifest: dict, entry: str, size: int, note: str) -> int:
+        n = (
+            await conn.execute(select(func.coalesce(func.max(versions.c.n), 0)).where(versions.c.site_id == site_id))
+        ).scalar_one() + 1
+        await conn.execute(
+            versions.insert().values(
+                site_id=site_id,
+                n=n,
+                created_at=int(time.time()),
+                note=note[:200],
+                entry=entry,
+                size=size,
+                files=len(manifest),
+            )
+        )
+        await conn.execute(
+            version_files.insert(), [{"site_id": site_id, "n": n, "path": p, "digest": d} for p, d in manifest.items()]
+        )
+        await conn.execute(update(sites).where(sites.c.id == site_id).values(live=n))
+        return n
 
     async def create(self, name: str, zip_bytes: bytes, note: str = "", owner: dict | None = None) -> tuple[dict, str]:
-        if owner:
-            if len(await self.list_user_sites(owner["sub"])) >= MAX_SITES_PER_USER:
-                raise SiteError(f"you have {MAX_SITES_PER_USER} shared sites, the most an account can have", 429)
-            await self._count_upload(owner)
+        await self._ready()
+        manifest, entry, size = await self._upload_files(zip_bytes)
         token = secrets.token_urlsafe(24)
-        meta = {
-            "id": _new_id(),
-            "name": (name or "Untitled site")[:100],
-            "token_hash": _hash_token(token),
-            "owner": owner["sub"] if owner else None,
-            "created_at": int(time.time()),
-            "live": None,
-            "versions": [],
-        }
-        await self._store_version(meta, zip_bytes, note)
-        if owner:
-            await self._add_user_site(owner["sub"], meta["id"])
+        site_id = _new_id()
+        async with self.engine.begin() as conn:
+            if owner:
+                count = (
+                    await conn.execute(
+                        select(func.count()).where(sites.c.owner == owner["sub"], sites.c.deleted_at.is_(None))
+                    )
+                ).scalar_one()
+                if count >= MAX_SITES_PER_USER:
+                    raise SiteError(f"you have {MAX_SITES_PER_USER} shared sites, the most an account can have", 429)
+                await self._count_upload(conn, owner)
+            await conn.execute(
+                sites.insert().values(
+                    id=site_id,
+                    name=(name or "Untitled site")[:100],
+                    token_hash=_hash_token(token),
+                    owner=owner["sub"] if owner else None,
+                    created_at=int(time.time()),
+                    deleted_by_admin=False,
+                )
+            )
+            await self._add_version(conn, site_id, manifest, entry, size, note)
+            meta = await self.public_meta(site_id, conn)
         return meta, token
 
     async def add_version(
         self, site_id: str, token: str | None, zip_bytes: bytes, note: str = "", user: dict | None = None
     ) -> dict:
-        meta = await self.load_meta(site_id)
-        self.check_access(meta, token, user)
-        if len(meta["versions"]) >= MAX_VERSIONS_PER_SITE:
-            raise SiteError(f"this site has {MAX_VERSIONS_PER_SITE} versions, the most a site can have", 429)
-        await self._count_upload(user)
-        await self._store_version(meta, zip_bytes, note)
-        return meta
+        await self._ready()
+        async with self.engine.connect() as conn:  # check access before spending storage on the upload
+            self.check_access(await self._site(conn, site_id), token, user)
+        manifest, entry, size = await self._upload_files(zip_bytes)
+        try:
+            async with self.engine.begin() as conn:
+                site = await self._site(conn, site_id, lock=True)  # serialises publishes to one site
+                self.check_access(site, token, user)
+                count = (await conn.execute(select(func.count()).where(versions.c.site_id == site_id))).scalar_one()
+                if count >= MAX_VERSIONS_PER_SITE:
+                    raise SiteError(f"this site has {MAX_VERSIONS_PER_SITE} versions, the most a site can have", 429)
+                await self._count_upload(conn, user)
+                await self._add_version(conn, site_id, manifest, entry, size, note)
+                return await self.public_meta(site_id, conn)
+        except IntegrityError as e:  # two publishes raced for the same version number (SQLite has no row lock)
+            raise SiteError("another version was published at the same moment; try again", 409) from e
 
     async def set_live(self, site_id: str, token: str | None, n: int, user: dict | None = None) -> dict:
-        meta = await self.load_meta(site_id)
-        self.check_access(meta, token, user)
-        if not 1 <= n <= len(meta["versions"]):
-            raise SiteError("no such version", 404)
-        meta["live"] = n
-        await self._save_meta(meta)
-        return meta
-
-    async def claim(self, site_id: str, token: str | None, user: dict) -> dict:
-        meta = await self.load_meta(site_id)
-        if not token or not hmac.compare_digest(_hash_token(token), meta["token_hash"]):
-            raise SiteError("invalid or missing edit token", 403)
-        if meta.get("owner") and meta["owner"] != user["sub"]:
-            raise SiteError("this site already belongs to another account", 409)
-        meta["owner"] = user["sub"]
-        await self._save_meta(meta)
-        await self._add_user_site(user["sub"], site_id)
-        return meta
+        await self._ready()
+        async with self.engine.begin() as conn:
+            self.check_access(await self._site(conn, site_id, lock=True), token, user)
+            exists = (
+                await conn.execute(select(versions.c.n).where(versions.c.site_id == site_id, versions.c.n == n))
+            ).first()
+            if not exists:
+                raise SiteError("no such version", 404)
+            await conn.execute(update(sites).where(sites.c.id == site_id).values(live=n))
+            return await self.public_meta(site_id, conn)
 
     async def delete(self, site_id: str, token: str | None, user: dict | None = None) -> None:
         """Unpublish a site: its links stop working. The owner, its token or an admin (takedown) may do it.
-        Files stay in storage (content-addressed blobs can be shared between sites)."""
-        meta = await self.load_meta(site_id)
-        if not is_admin(user):
-            self.check_access(meta, token, user)
-        tombstone = {"id": site_id, "deleted": True, "deleted_at": int(time.time()), "by_admin": is_admin(user)}
-        await self.storage.put(self._meta_key(site_id), json.dumps(tombstone).encode(), "application/json")
-        if meta.get("owner"):
-            doc = await self._load_user(meta["owner"])
-            doc["sites"] = [i for i in doc["sites"] if i != site_id]
-            await self._save_user(meta["owner"], doc)
+        Its files are removed by the cleanup job once no other site uses them."""
+        await self._ready()
+        async with self.engine.begin() as conn:
+            site = await self._site(conn, site_id, lock=True)
+            if not is_admin(user):
+                self.check_access(site, token, user)
+            await conn.execute(
+                update(sites)
+                .where(sites.c.id == site_id)
+                .values(deleted_at=int(time.time()), deleted_by_admin=is_admin(user))
+            )
 
     async def rotate_token(self, site_id: str, token: str | None, user: dict | None = None) -> str:
         """Replace a leaked edit token: the old one stops working."""
-        meta = await self.load_meta(site_id)
-        self.check_access(meta, token, user)
+        await self._ready()
         new = secrets.token_urlsafe(24)
-        meta["token_hash"] = _hash_token(new)
-        await self._save_meta(meta)
+        async with self.engine.begin() as conn:
+            self.check_access(await self._site(conn, site_id, lock=True), token, user)
+            await conn.execute(update(sites).where(sites.c.id == site_id).values(token_hash=_hash_token(new)))
         return new
 
+    async def claim(self, site_id: str, token: str | None, user: dict) -> dict:
+        await self._ready()
+        async with self.engine.begin() as conn:
+            site = await self._site(conn, site_id, lock=True)
+            if not token or not hmac.compare_digest(_hash_token(token), site.token_hash):
+                raise SiteError("invalid or missing edit token", 403)
+            if site.owner and site.owner != user["sub"]:
+                raise SiteError("this site already belongs to another account", 409)
+            await conn.execute(update(sites).where(sites.c.id == site_id).values(owner=user["sub"]))
+            return await self.public_meta(site_id, conn)
+
+    # ---- maintenance ----
+
     async def cleanup(self, min_age_seconds: int = 3600) -> dict:
-        """Delete stored files that no live or unpublished-but-kept site version uses.
+        """Delete stored files that no published site version uses.
 
         Files younger than min_age_seconds are kept: an upload writes its files before its metadata,
         so a brand-new file may not be referenced yet."""
-        referenced: set[str] = set()
-        metas = [key for key, _ in await self.storage.list("sites/") if key.endswith("/meta.json")]
-        for key in metas:
-            raw = await self.storage.get(key, fresh=True)
-            meta = json.loads(raw) if raw else {}
-            for version in meta.get("versions", []):
-                referenced.update(version["manifest"].values())
+        await self._ready()
+        async with self.engine.connect() as conn:
+            q = (
+                select(version_files.c.digest)
+                .join(sites, sites.c.id == version_files.c.site_id)
+                .where(sites.c.deleted_at.is_(None))
+                .distinct()
+            )
+            referenced = set((await conn.execute(q)).scalars())
         now = time.time()
         orphans = [
             key
@@ -292,22 +389,4 @@ class Sites:
         ]
         if orphans:
             await self.storage.delete(orphans)
-        return {"sites": len(metas), "files_referenced": len(referenced), "files_deleted": len(orphans)}
-
-    async def read_file(self, version: dict, path: str) -> bytes | None:
-        digest = version["manifest"].get(path)
-        if digest is None:
-            return None
-        return await self.storage.get(f"blobs/{digest}")
-
-
-def public_meta(meta: dict) -> dict:
-    return {
-        "id": meta["id"],
-        "name": meta["name"],
-        "live": meta["live"],
-        "versions": [
-            {k: v for k, v in ver.items() if k != "manifest"} | {"files": len(ver["manifest"])}
-            for ver in meta["versions"]
-        ],
-    }
+        return {"files_referenced": len(referenced), "files_deleted": len(orphans)}
