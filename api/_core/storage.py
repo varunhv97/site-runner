@@ -5,6 +5,7 @@ Every store offers: put, get (fresh=True for keys that get overwritten), delete,
 
 import asyncio
 import calendar
+import contextvars
 import os
 import secrets
 import time
@@ -16,6 +17,11 @@ import httpx
 
 class StorageError(Exception):
     pass
+
+
+# Vercel gives each function request a short-lived OIDC token in the x-vercel-oidc-token header
+# (index.py's middleware stores it here). Locally, `vercel env pull` provides VERCEL_OIDC_TOKEN.
+oidc_token: contextvars.ContextVar[str | None] = contextvars.ContextVar("oidc_token", default=None)
 
 
 class LocalStorage:
@@ -76,19 +82,36 @@ class BlobStorage:
     API = "https://vercel.com/api/blob"
     API_VERSION = "11"
 
-    def __init__(self, token: str, access: str = "private"):
+    def __init__(self, token: str | None = None, store_id: str | None = None, access: str = "private"):
+        """Authenticate with a read-write token (BLOB_READ_WRITE_TOKEN), or with Vercel OIDC and the
+        store's id (BLOB_STORE_ID), which is what connecting a private store sets up."""
         if access not in ("private", "public"):
             raise StorageError("BLOB_ACCESS must be private or public")
-        # Token format: vercel_blob_rw_<storeId>_<secret>
-        parts = token.split("_")
-        if len(parts) < 5:
-            raise StorageError("BLOB_READ_WRITE_TOKEN has an unexpected format")
-        self.token = token
+        if token:
+            # Token format: vercel_blob_rw_<storeId>_<secret>
+            parts = token.split("_")
+            if len(parts) < 5:
+                raise StorageError("BLOB_READ_WRITE_TOKEN has an unexpected format")
+            store_id = parts[3]
+        elif not store_id:
+            raise StorageError("set BLOB_READ_WRITE_TOKEN or BLOB_STORE_ID")
+        self.static_token = token
+        self.store_id = store_id.removeprefix("store_")
         self.access = access
-        self.base = f"https://{parts[3].lower()}.{access}.blob.vercel-storage.com"
+        self.base = f"https://{self.store_id.lower()}.{access}.blob.vercel-storage.com"
+
+    @property
+    def token(self) -> str:
+        found = self.static_token or oidc_token.get() or os.environ.get("VERCEL_OIDC_TOKEN")
+        if not found:
+            raise StorageError("no Blob credentials: missing OIDC token (x-vercel-oidc-token) or BLOB_READ_WRITE_TOKEN")
+        return found
 
     def _auth(self) -> dict:
-        return {"authorization": f"Bearer {self.token}", "x-api-version": self.API_VERSION}
+        headers = {"authorization": f"Bearer {self.token}", "x-api-version": self.API_VERSION}
+        if not self.static_token:
+            headers["x-vercel-blob-store-id"] = self.store_id  # OIDC tokens don't name the store
+        return headers
 
     def _url(self, key: str) -> str:
         return f"{self.base}/{quote(key)}"
@@ -154,7 +177,7 @@ class BlobStorage:
 
 
 def make_storage():
-    token = os.environ.get("BLOB_READ_WRITE_TOKEN")
-    if token:
-        return BlobStorage(token, os.environ.get("BLOB_ACCESS", "private"))
+    token, store_id = os.environ.get("BLOB_READ_WRITE_TOKEN"), os.environ.get("BLOB_STORE_ID")
+    if token or store_id:
+        return BlobStorage(token, store_id, os.environ.get("BLOB_ACCESS", "private"))
     return LocalStorage(os.environ.get("LOCAL_DATA_DIR", ".data"))

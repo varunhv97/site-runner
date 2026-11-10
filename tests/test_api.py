@@ -125,3 +125,18 @@ def test_cleanup_deletes_only_unused_old_files(client, tmp_path, monkeypatch):
     assert r.status_code == 200 and r.json()["files_deleted"] == 2  # "gone" and "only-here.css"
     assert client.get(f"/s/{keep}/").text == "kept"
     assert (blobs / "fresh-upload").exists()
+
+
+def test_blob_storage_credentials(monkeypatch):
+    from _core.storage import BlobStorage, oidc_token
+
+    rw = BlobStorage(token="vercel_blob_rw_AbC123_secret")
+    assert rw.base == "https://abc123.private.blob.vercel-storage.com"
+    assert "x-vercel-blob-store-id" not in rw._auth()
+
+    monkeypatch.delenv("VERCEL_OIDC_TOKEN", raising=False)
+    oidc = BlobStorage(store_id="store_S7RKoWvKj")
+    assert oidc.base == "https://s7rkowvkj.private.blob.vercel-storage.com"
+    oidc_token.set("request-token")
+    assert oidc._auth()["authorization"] == "Bearer request-token"
+    assert oidc._auth()["x-vercel-blob-store-id"] == "S7RKoWvKj"

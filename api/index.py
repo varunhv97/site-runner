@@ -18,13 +18,21 @@ from sqlalchemy.exc import OperationalError  # noqa: E402
 from _core import auth  # noqa: E402
 from _core.db import make_engine  # noqa: E402
 from _core.sites import SiteError, Sites, content_type  # noqa: E402
-from _core.storage import StorageError, make_storage  # noqa: E402
+from _core.storage import StorageError, make_storage, oidc_token  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("site-runner")
 
 app = FastAPI(title="Site Runner", docs_url=None, redoc_url=None, openapi_url=None)
 sites = Sites(make_storage(), make_engine())
+
+
+@app.middleware("http")
+async def remember_oidc_token(request: Request, call_next):
+    """Blob storage authenticates with the per-request OIDC token Vercel attaches to function calls."""
+    oidc_token.set(request.headers.get("x-vercel-oidc-token"))
+    return await call_next(request)
+
 
 # Shared content runs with an opaque origin: it can't read this app's cookies/storage.
 SANDBOX_CSP = "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock"
