@@ -6,6 +6,19 @@ const MAX_ZIP = 4 * 1024 * 1024;
 
 type RemoteSite = { id: string; live: number | null; versions: { n: number }[] };
 
+class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+// The browser remembers which shared site a local site is linked to. That site can disappear
+// (unpublished elsewhere, taken down, or created before a storage move): the server then says 404.
+const isGone = (e: unknown) => e instanceof ApiError && e.status === 404;
+
 async function call<T>(url: string, init: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -14,8 +27,17 @@ async function call<T>(url: string, init: RequestInit): Promise<T> {
     throw new Error("Share server unreachable. Is the API running?");
   }
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
+  if (!res.ok) throw new ApiError(body.error ?? `Request failed (${res.status})`, res.status);
   return body as T;
+}
+
+async function callExisting<T>(url: string, init: RequestInit): Promise<T> {
+  try {
+    return await call<T>(url, init);
+  } catch (e) {
+    if (isGone(e)) throw new Error("This shared site no longer exists. Click Unpublish to clear it, then share again.");
+    throw e;
+  }
 }
 
 /** Upload a local version. Creates the remote site on first share. Returns the updated site. */
@@ -28,30 +50,35 @@ export async function shareVersion(original: LocalSite, version: LocalVersion): 
   form.append("file", new Blob([zip as BlobPart], { type: "application/zip" }), "site.zip");
   form.append("note", version.note || `local v${version.n}`);
 
-  if (!site.remote) {
-    form.append("name", site.name);
-    const r = await call<{ site: RemoteSite; edit_token: string; url: string }>("/api/sites", {
-      method: "POST",
-      body: form,
-    });
-    site.remote = { siteId: r.site.id, token: r.edit_token, url: r.url, live: r.site.live, pushed: {} };
-    site.remote.pushed[version.n] = r.site.live!;
-  } else {
-    const r = await call<{ site: RemoteSite }>(`/api/sites/${site.remote.siteId}/versions`, {
-      method: "POST",
-      body: form,
-      headers: { Authorization: `Bearer ${site.remote.token}` },
-    });
-    site.remote.live = r.site.live;
-    site.remote.pushed[version.n] = r.site.live!;
+  if (site.remote) {
+    try {
+      const r = await call<{ site: RemoteSite }>(`/api/sites/${site.remote.siteId}/versions`, {
+        method: "POST",
+        body: form,
+        headers: { Authorization: `Bearer ${site.remote.token}` },
+      });
+      site.remote.live = r.site.live;
+      site.remote.pushed[version.n] = r.site.live!;
+      return site;
+    } catch (e) {
+      if (!isGone(e)) throw e;
+      delete site.remote; // the shared copy is gone: share this version as a new site below
+    }
   }
+  form.append("name", site.name);
+  const r = await call<{ site: RemoteSite; edit_token: string; url: string }>("/api/sites", {
+    method: "POST",
+    body: form,
+  });
+  site.remote = { siteId: r.site.id, token: r.edit_token, url: r.url, live: r.site.live, pushed: {} };
+  site.remote.pushed[version.n] = r.site.live!;
   return site;
 }
 
 export async function setRemoteLive(original: LocalSite, remoteN: number): Promise<LocalSite> {
   const site = structuredClone(original);
   if (!site.remote) return site;
-  const r = await call<{ site: RemoteSite }>(`/api/sites/${site.remote.siteId}/live`, {
+  const r = await callExisting<{ site: RemoteSite }>(`/api/sites/${site.remote.siteId}/live`, {
     method: "POST",
     headers: { Authorization: `Bearer ${site.remote.token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ version: remoteN }),
@@ -64,10 +91,14 @@ export async function setRemoteLive(original: LocalSite, remoteN: number): Promi
 export async function unpublish(original: LocalSite): Promise<LocalSite> {
   const site = structuredClone(original);
   if (!site.remote) return site;
-  await call(`/api/sites/${site.remote.siteId}`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${site.remote.token}` },
-  });
+  try {
+    await call(`/api/sites/${site.remote.siteId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${site.remote.token}` },
+    });
+  } catch (e) {
+    if (!isGone(e)) throw e; // already gone: forgetting the link is all that's left to do
+  }
   delete site.remote;
   return site;
 }
@@ -76,7 +107,7 @@ export async function unpublish(original: LocalSite): Promise<LocalSite> {
 export async function rotateToken(original: LocalSite): Promise<LocalSite> {
   const site = structuredClone(original);
   if (!site.remote) return site;
-  const r = await call<{ edit_token: string }>(`/api/sites/${site.remote.siteId}/token`, {
+  const r = await callExisting<{ edit_token: string }>(`/api/sites/${site.remote.siteId}/token`, {
     method: "POST",
     headers: { Authorization: `Bearer ${site.remote.token}` },
   });
