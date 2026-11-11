@@ -111,6 +111,49 @@ deleted_versions = Table(
 )
 
 
+# ---- abuse handling (_core/abuse.py) ----
+
+# Reports of abusive shared sites, from anyone (signed in or not). status: open, actioned or dismissed.
+reports = Table(
+    "reports",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String(16), nullable=False),
+    Column("url", String(500), nullable=False),
+    Column("reason", String(20), nullable=False),
+    Column("details", Text, nullable=False, default=""),
+    Column("contact", String(320), nullable=False, default=""),
+    Column("reporter", String(255), nullable=True),  # the reporter's Google sub when signed in
+    Column("created_at", Integer, nullable=False),
+    Column("status", String(10), nullable=False, default="open"),
+    Column("handled_by", String(320), nullable=True),  # admin email
+    Column("handled_at", Integer, nullable=True),
+    Index("ix_reports_status", "status"),
+    Index("ix_reports_site", "site_id"),
+)
+
+# Accounts that may not share. Matched by email, or by the Google sub known for it when banned.
+bans = Table(
+    "bans",
+    metadata,
+    Column("email", String(320), primary_key=True),  # lower-cased
+    Column("sub", String(255), nullable=True),
+    Column("reason", String(500), nullable=False, default=""),
+    Column("created_at", Integer, nullable=False),
+    Column("by_admin", String(320), nullable=False),
+    Index("ix_bans_sub", "sub"),
+)
+
+# Generic fixed-window counters for rate limits: key (e.g. "report:<ip>") per window (e.g. an hour).
+rate_limits = Table(
+    "rate_limits",
+    metadata,
+    Column("key", String(300), primary_key=True),
+    Column("window", String(16), primary_key=True),  # YYYY-MM-DDTHH, UTC
+    Column("count", Integer, nullable=False),
+)
+
+
 def _async_url(url: str) -> tuple[str, dict]:
     """Turn a provider URL (postgres://...?sslmode=require) into an async SQLAlchemy URL + connect args."""
     if url.startswith("sqlite"):
