@@ -28,4 +28,5 @@ jobs:
       - run: npm ci
       - run: npx eslint app lib
       - run: npx tsc --noEmit
+      - run: node --test tests/path_rules.test.mjs
       - run: npm run build

@@ -4,8 +4,11 @@ Only reachable through HostRouter (api/index.py) for hosts under USERCONTENT_BAS
 routes exist here, the server never reads cookies here and never sets one.
 """
 
+import json
 import logging
+import pathlib
 import re
+import secrets
 from collections.abc import Callable
 from urllib.parse import quote
 
@@ -34,6 +37,36 @@ CONTENT_HEADERS = {
 
 PINNED = re.compile(r"^@(\d{1,9})(/|$)", re.ASCII)
 
+_PREVIEW = pathlib.Path(__file__).parent / "preview"
+_LIB_JS = (_PREVIEW / "lib.js").read_text()
+_SW_JS = (_PREVIEW / "sw.js").read_text()
+_BOOT_JS = (_PREVIEW / "boot.js").read_text()
+
+
+def _js(value) -> str:
+    """JSON safe to put inside a <script> element."""
+    return json.dumps(value).replace("<", "\\u003c")
+
+
+BOOT_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loading preview</title>
+<style nonce="__NONCE__">
+body{margin:0;min-height:100vh;display:grid;place-items:center;font:15px/1.5 system-ui,sans-serif;color:#555;background:#fff}
+</style>
+</head>
+<body>
+<p id="status">Loading preview…</p>
+<script nonce="__NONCE__">
+__SCRIPT__
+</script>
+</body>
+</html>
+"""
+
 
 def not_found(message: str = "Not found in this site.") -> Response:
     return Response(f"<h1>404</h1><p>{message}</p>", 404, media_type="text/html")
@@ -49,6 +82,7 @@ def make_content_app(get_sites: Callable) -> FastAPI:
 
     @content.exception_handler(StorageError)
     @content.exception_handler(OperationalError)
+    @content.exception_handler(hosts.ConfigError)
     async def unavailable(_: Request, exc: Exception):
         log.error("content: %s", exc)
         return Response("Unavailable right now. Try again in a minute.", 503, media_type="text/plain")
@@ -63,9 +97,46 @@ def make_content_app(get_sites: Callable) -> FastAPI:
         label = hosts.content_label(request.headers.get("host")) or ""
         if hosts.SITE_LABEL.match(label):
             return await serve_site(get_sites(), request, label, path)
+        if hosts.PREVIEW_LABEL.match(label):
+            return serve_preview(request, path)
         return not_found("There's no site here.")
 
     return content
+
+
+def serve_preview(request: Request, path: str) -> Response:
+    """p-<local id> hosts: only the boot page and the service worker come from here. Once the worker is in,
+    it serves everything else from the files /app handed over (they never reach this server)."""
+    if path == "__sr/sw.js":
+        return Response(
+            _LIB_JS + "\n" + _SW_JS.replace("__SANDBOX_CSP__", _js(SANDBOX_CSP)),
+            media_type="text/javascript; charset=utf-8",
+            headers={
+                "Service-Worker-Allowed": "/",
+                "Cache-Control": "no-cache",
+                "Content-Security-Policy": f"{SANDBOX_CSP}; default-src 'none'",
+            },
+        )
+    if request.headers.get("service-worker") == "script":
+        return Response("Only the preview's own service worker runs here.", 403, media_type="text/plain")
+    if path == "__sr/boot":
+        app = hosts.app_origin()
+        nonce = secrets.token_urlsafe(16)
+        script = _LIB_JS + "\n" + _BOOT_JS.replace("__APP_ORIGIN__", _js(app))
+        html = BOOT_HTML.replace("__SCRIPT__", script).replace("__NONCE__", nonce)
+        return Response(
+            html,
+            media_type="text/html; charset=utf-8",
+            headers={
+                "Content-Security-Policy": (
+                    f"{SANDBOX_CSP}; default-src 'none'; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'; "
+                    f"worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors {app}"
+                ),
+                "Cache-Control": "no-store",
+                "Referrer-Policy": "no-referrer",
+            },
+        )
+    return not_found("This preview isn't loaded. Open it again from Site Runner.")
 
 
 async def serve_site(sites, request: Request, site_id: str, path: str) -> Response:

@@ -248,3 +248,48 @@ def test_content_domain_config(monkeypatch):
 
 def test_config_endpoint(client):
     assert client.get("/api/config").json() == {"content_scheme": "https", "content_domain": DOMAIN}
+
+
+# ---- local previews: p-<local id> hosts serve only our boot page and service worker ----
+
+PREVIEW = {"Host": f"p-0123456789ab.{DOMAIN}"}
+
+
+def test_preview_boot_page(client, monkeypatch):
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://spinsite.app")
+    r = client.get("/__sr/boot", headers=PREVIEW | {"Cookie": "__Host-sr_session=x"})
+    assert r.status_code == 200 and "set-cookie" not in r.headers
+    csp = r.headers["content-security-policy"]
+    nonce = csp.split("'nonce-", 1)[1].split("'", 1)[0]
+    assert csp.startswith("sandbox ") and "allow-same-origin" in csp
+    assert f"script-src 'nonce-{nonce}'" in csp and "unsafe-inline" not in csp
+    assert "worker-src 'self'" in csp and "frame-ancestors https://spinsite.app" in csp
+    assert r.text.count(f'<script nonce="{nonce}">') == 1
+    assert 'const SR_APP = "https://spinsite.app";' in r.text  # talks to the app's exact origin only
+    assert r.headers["origin-agent-cluster"] == "?1" and r.headers["cache-control"] == "no-store"
+    assert client.get("/__sr/boot", headers=PREVIEW).headers["content-security-policy"] != csp  # fresh nonce
+
+
+def test_preview_service_worker(client):
+    r = client.get("/__sr/sw.js", headers=PREVIEW | {"Service-Worker": "script"})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/javascript")
+    assert r.headers["service-worker-allowed"] == "/"
+    assert "function srResolvePath" in r.text and "__SANDBOX_CSP__" not in r.text
+    assert "allow-same-origin" in r.text.split("const SR_SANDBOX = ", 1)[1].split(";\n", 1)[0]
+
+
+def test_previews_files_never_come_from_the_server(client):
+    sid = site(client)["site"]["id"]
+    for path in ("/", "/index.html", "/@1/", "/__sr/other"):
+        r = client.get(path, headers=PREVIEW)
+        assert r.status_code == 404 and "set-cookie" not in r.headers, path
+        assert r.headers["content-security-policy"].startswith("sandbox "), path
+    # only our worker may register on a preview host
+    assert client.get("/evil-sw.js", headers=PREVIEW | {"Service-Worker": "script"}).status_code == 403
+    # previews have no app routes either, and a site id isn't a preview id
+    assert client.get("/api/auth/me", headers=PREVIEW).status_code == 404
+    assert client.get("/__sr/boot", headers={"Host": f"p-{sid}.{DOMAIN}"}).status_code == 404
+    assert (
+        client.get("/__sr/boot", headers={"Host": f"p-0123456789AB.{DOMAIN}"}).status_code == 200
+    )  # Host is case-insensitive
+    assert client.get("/__sr/boot", headers=on(sid)).status_code == 404  # a site host has no boot page
