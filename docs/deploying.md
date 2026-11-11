@@ -11,6 +11,8 @@ Site Runner runs on Vercel. The project is connected to this repo:
 `vercel.json` does three things:
 - sends `/api/*`, `/s/*` and `/r/*` to `api/index.py`
 - redirects `www.spinsite.app` to `spinsite.app`, so sign-in, cookies and browser storage stay on one origin
+- redirects the old `spinsite.vercel.app` address for shared links (`/s/`, `/r/`), the landing page and
+  sign-in. `/app` stays there for now, so people can still open local sites saved on that address
 - schedules the daily cleanup job
 
 Vercel installs Python dependencies from `pyproject.toml`. Keep it in sync with `requirements.txt`.

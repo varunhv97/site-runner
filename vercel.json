@@ -10,6 +10,50 @@
       ],
       "destination": "https://spinsite.app/$1",
       "permanent": true
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "spinsite.vercel.app"
+        }
+      ],
+      "destination": "https://spinsite.app/",
+      "permanent": true
+    },
+    {
+      "source": "/s/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "spinsite.vercel.app"
+        }
+      ],
+      "destination": "https://spinsite.app/s/$1",
+      "permanent": true
+    },
+    {
+      "source": "/r/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "spinsite.vercel.app"
+        }
+      ],
+      "destination": "https://spinsite.app/r/$1",
+      "permanent": true
+    },
+    {
+      "source": "/api/auth/login",
+      "has": [
+        {
+          "type": "host",
+          "value": "spinsite.vercel.app"
+        }
+      ],
+      "destination": "https://spinsite.app/api/auth/login",
+      "permanent": false
     }
   ],
   "rewrites": [
