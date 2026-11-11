@@ -18,6 +18,7 @@ export type RemoteLink = {
   url: string;
   live: number | null;
   pushed: Record<number, number>; // local version n -> remote version n
+  held?: string[]; // held for a safety review: why (its links answer 451 until an admin approves it)
 };
 
 export type LocalSite = {

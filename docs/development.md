@@ -30,7 +30,7 @@ CI runs the same on every push:
 
 ```bash
 black --check api tests && pytest -q
-npx eslint app lib && npx tsc --noEmit && npm run build
+npx eslint app lib && npx tsc --noEmit && npm run test:js && npm run build
 ```
 
 ## Known limitations

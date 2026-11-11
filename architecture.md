@@ -15,6 +15,8 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
               ├─ _core/frames.py       wrapper page + in-frame storage script
               ├─ _core/abuse.py        reports, bans, report rate limit
               ├─ _core/sites.py        zip validation, versions, access, limits, cleanup
+              ├─ _core/scan.py         refuses executables; flags phishing / seed phrases / miners
+              ├─ _core/holds.py        `holds` table: flagged sites answer 451 until an admin decides
               ├─ _core/db.py           SQLAlchemy tables; Postgres via DATABASE_URL, else SQLite (.data/)
               └─ _core/storage.py      LocalStorage (.data/) | BlobStorage (Vercel Blob REST)
 ```
@@ -86,6 +88,16 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
 - Frame reports path/hash/title; the wrapper mirrors them into its address bar (only under its own `/s/<ref>/`).
 - Links leaving the site get `target=_top` (`allow-top-navigation-by-user-activation`).
 - Tests: `tests/test_frames.py`. Browser behaviour was checked by hand in headless Chrome (see tasks.md).
+
+## Upload safety
+- `scan.py` runs in `Upload()`: executables → 400 (extensions in `lib/blocked-files.json`, mirrored in Python and
+  compared by a test; plus PE/ELF/Mach-O/APK-JAR magic bytes). Content scan (`UPLOAD_SCAN`, default on) of HTML/JS
+  (512KB a file, 4MB total): phishing needs a password field + two of brand / external credential target / known
+  drop (Telegram bot, Discord webhook, form relays); "Sign in with Google" text doesn't count as a brand.
+- Findings → row in `holds` (site, n, reasons, status held/approved/rejected, reviewer). `Sites.resolve()` raises
+  451 while any row is held, so every serving path shows "waiting for a safety review". Admins approve or reject
+  (reject = admin unpublish) via `/api/admin/holds`.
+- Client: `lib/executables.ts` (same list) blocks Share; `lib/secrets.ts` warns about likely keys before Share.
 
 ## Path resolution (same in sw.js and index.py)
 `/` → entry (redirect if entry is in a subfolder) · `dir/` → `dir/index.html` · `dir` with `dir/index.html` → redirect to `dir/`.

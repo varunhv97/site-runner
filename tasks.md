@@ -42,6 +42,10 @@
   `/admin`, account bans (block all share writes, unpublish sites); "Report abuse" link in /app; `tests/test_abuse.py`.
   Landing page footer link still to add (public/index.html, taste-skill)
 
+- [x] Upload checks (2026-11-11): executables refused (extension + magic bytes, client and server); phishing,
+  seed-phrase and miner pages held for admin review (451, `holds` table, `/api/admin/holds`, `UPLOAD_SCAN`);
+  pre-share secret scan in /app (`lib/secrets.ts`, node tests); `tests/test_scan.py`
+
 ## Next
 - [ ] **HIGH PRIORITY:** serve local previews from a separate origin. Today a malicious zip previewed locally
   runs same-origin as the app and can read the edit tokens in IndexedDB
@@ -49,7 +53,7 @@
 - [ ] Disconnect Development from site-runner-db and site-runner-private (local dev uses SQLite + .data)
 - [ ] Optional: a Neon `dev` branch for testing against real Postgres
 - [ ] Add Alembic migrations before the first schema change
-- [ ] Pre-share warning + secret scan (API keys in JS); optional expiry for old shares
+- [ ] Optional expiry for old shares
 - [ ] MCP server (Python FastMCP): create_site, upload_version, list_versions, set_live, diff_versions
 - [ ] Serve shared content from a separate domain (stronger isolation; would replace the localStorage bridge)
 - [ ] Bridge gaps: IndexedDB and cookies aren't saved; popups opened by a shared site get no saved storage

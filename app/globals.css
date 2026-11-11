@@ -201,3 +201,7 @@ main.narrow { max-width: 680px; }
 .reports .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 14px; }
 .reports .details { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .reports .row { justify-content: flex-start; }
+/* upload checks: executables warning, held-for-review notice, lists in dialogs */
+.notice { padding: 12px 16px; border-radius: var(--r-md); margin-bottom: 16px; border: 1px solid var(--accent); color: var(--accent); }
+.share .held { margin: 0 0 8px; color: var(--danger); }
+.app-dialog__items { margin: -4px 0 0; padding-left: 18px; font: 13px/1.5 var(--font-mono), monospace; word-break: break-all; max-height: 40vh; overflow: auto; }

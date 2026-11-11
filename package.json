@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "dev:api": "set -a; [ -f .env.auth.local ] && . ./.env.auth.local; set +a; uvicorn api.index:app --reload --port 8000",
-    "test": "pytest -q"
+    "test": "pytest -q",
+    "test:js": "node --test \"tests/js/*.test.mjs\""
   },
   "dependencies": {
     "fflate": "^0.8.3",

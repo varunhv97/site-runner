@@ -1,11 +1,14 @@
 // Talks to the Python share API (/api/*).
 import { zipSync } from "fflate";
+import { executableMessage, findExecutable } from "./executables";
 import type { FileMap } from "./ingest";
 import { readVersionFiles, type LocalSite, type LocalVersion } from "./localStore";
 
 const MAX_ZIP = 4 * 1024 * 1024;
 
 type RemoteSite = { id: string; slug: string | null; live: number | null; versions: { n: number }[] };
+/** Share responses say whether the site is held for a safety review (its links answer 451 until approved). */
+type HoldStatus = { held?: boolean; reasons?: string[] };
 
 /** A suggestion for a link name from a site's name: "Trail Map v2!" -> "trail-map-v2". */
 export function slugify(name: string): string {
@@ -69,7 +72,10 @@ async function callExisting<T>(url: string, init: RequestInit): Promise<T> {
 /** Upload a local version. Creates the remote site on first share. Returns the updated site. */
 export async function shareVersion(original: LocalSite, version: LocalVersion, slug?: string): Promise<LocalSite> {
   const site = structuredClone(original);
-  const zip = zipSync(await readVersionFiles(version), { level: 6 });
+  const files = await readVersionFiles(version);
+  const executable = findExecutable(files);
+  if (executable) throw new Error(executableMessage(executable));
+  const zip = zipSync(files, { level: 6 });
   if (zip.byteLength > MAX_ZIP) throw new Error("This version is over 4MB zipped, too large to share.");
 
   const form = new FormData();
@@ -79,13 +85,14 @@ export async function shareVersion(original: LocalSite, version: LocalVersion, s
 
   if (site.remote) {
     try {
-      const r = await call<{ site: RemoteSite }>(`/api/sites/${site.remote.siteId}/versions`, {
+      const r = await call<{ site: RemoteSite } & HoldStatus>(`/api/sites/${site.remote.siteId}/versions`, {
         method: "POST",
         body: form,
         headers: { Authorization: `Bearer ${site.remote.token}` },
       });
       site.remote.live = r.site.live;
       site.remote.pushed[version.n] = r.site.live!;
+      site.remote.held = r.held ? r.reasons : undefined;
       return site;
     } catch (e) {
       if (!isGone(e)) throw e;
@@ -94,13 +101,30 @@ export async function shareVersion(original: LocalSite, version: LocalVersion, s
   }
   form.append("name", site.name);
   if (slug) form.append("slug", slug);
-  const r = await call<{ site: RemoteSite; edit_token: string; url: string }>("/api/sites", {
+  const r = await call<{ site: RemoteSite; edit_token: string; url: string } & HoldStatus>("/api/sites", {
     method: "POST",
     body: form,
   });
   site.remote = { siteId: r.site.id, slug: r.site.slug, token: r.edit_token, url: r.url, live: r.site.live, pushed: {} };
   site.remote.pushed[version.n] = r.site.live!;
+  site.remote.held = r.held ? r.reasons : undefined;
   return site;
+}
+
+/** Ask whether a held site has been reviewed. Returns the updated site, or the same one when nothing changed. */
+export async function refreshHold(original: LocalSite): Promise<LocalSite> {
+  if (!original.remote?.held) return original;
+  try {
+    const r = await call<HoldStatus>(`/api/sites/${original.remote.siteId}/hold`, {
+      headers: original.remote.token ? { Authorization: `Bearer ${original.remote.token}` } : {},
+    });
+    if (r.held) return original;
+    const site = structuredClone(original);
+    delete site.remote!.held;
+    return site;
+  } catch {
+    return original; // rejected sites answer 404: Publish/Unpublish then explain
+  }
 }
 
 export async function setRemoteLive(original: LocalSite, remoteN: number): Promise<LocalSite> {
