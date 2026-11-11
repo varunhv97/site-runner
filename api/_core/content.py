@@ -4,6 +4,7 @@ Only reachable through HostRouter (api/index.py) for hosts under USERCONTENT_BAS
 routes exist here, the server never reads cookies here and never sets one.
 """
 
+import functools
 import json
 import logging
 import pathlib
@@ -38,9 +39,12 @@ CONTENT_HEADERS = {
 PINNED = re.compile(r"^@(\d{1,9})(/|$)", re.ASCII)
 
 _PREVIEW = pathlib.Path(__file__).parent / "preview"
-_LIB_JS = (_PREVIEW / "lib.js").read_text()
-_SW_JS = (_PREVIEW / "sw.js").read_text()
-_BOOT_JS = (_PREVIEW / "boot.js").read_text()
+
+
+@functools.cache
+def _asset(name: str) -> str:
+    """lib.js, sw.js, boot.js. Read on first use, so a missing file only breaks previews, not the server."""
+    return (_PREVIEW / name).read_text()
 
 
 def _js(value) -> str:
@@ -109,7 +113,7 @@ def serve_preview(request: Request, path: str) -> Response:
     it serves everything else from the files /app handed over (they never reach this server)."""
     if path == "__sr/sw.js":
         return Response(
-            _LIB_JS + "\n" + _SW_JS.replace("__SANDBOX_CSP__", _js(SANDBOX_CSP)),
+            _asset("lib.js") + "\n" + _asset("sw.js").replace("__SANDBOX_CSP__", _js(SANDBOX_CSP)),
             media_type="text/javascript; charset=utf-8",
             headers={
                 "Service-Worker-Allowed": "/",
@@ -122,7 +126,7 @@ def serve_preview(request: Request, path: str) -> Response:
     if path == "__sr/boot":
         app = hosts.app_origin()
         nonce = secrets.token_urlsafe(16)
-        script = _LIB_JS + "\n" + _BOOT_JS.replace("__APP_ORIGIN__", _js(app))
+        script = _asset("lib.js") + "\n" + _asset("boot.js").replace("__APP_ORIGIN__", _js(app))
         html = BOOT_HTML.replace("__SCRIPT__", script).replace("__NONCE__", nonce)
         return Response(
             html,
