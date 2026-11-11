@@ -38,6 +38,10 @@
 - [x] "Shared from your account" in /app (2026-11-11): lists the account's shared sites missing from this browser;
   Open here downloads the live version and links it, so publishing updates the same link
 
+- [x] Upload checks (2026-11-11): executables refused (extension + magic bytes, client and server); phishing,
+  seed-phrase and miner pages held for admin review (451, `holds` table, `/api/admin/holds`, `UPLOAD_SCAN`);
+  pre-share secret scan in /app (`lib/secrets.ts`, node tests); `tests/test_scan.py`
+
 ## Next
 - [ ] **HIGH PRIORITY:** serve local previews from a separate origin. Today a malicious zip previewed locally
   runs same-origin as the app and can read the edit tokens in IndexedDB
@@ -45,7 +49,7 @@
 - [ ] Disconnect Development from site-runner-db and site-runner-private (local dev uses SQLite + .data)
 - [ ] Optional: a Neon `dev` branch for testing against real Postgres
 - [ ] Add Alembic migrations before the first schema change
-- [ ] Pre-share warning + secret scan (API keys in JS); optional expiry for old shares
+- [ ] Optional expiry for old shares
 - [ ] Report-abuse link and contact address
 - [ ] MCP server (Python FastMCP): create_site, upload_version, list_versions, set_live, diff_versions
 - [ ] Serve shared content from a separate domain (stronger isolation; would replace the localStorage bridge)

@@ -32,7 +32,8 @@ tokens. What a site saves stays in your browser, kept apart from every other sha
 
 Each shared version can be up to 4 MB zipped (50 MB unzipped, 2,000 files). Each account can have 50 shared
 sites and 250 MB of storage; a file used by many versions counts once. You can delete old shared versions to
-make room. Local previews are limited only by your browser's storage.
+make room. Executable files (`.exe`, `.apk`, `.dmg` and the like) can't be shared. Local previews are limited only
+by your browser's storage.
 
 ## For developers
 

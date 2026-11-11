@@ -21,6 +21,25 @@ the app's own origin. Scripts send no `Origin` header and authenticate with a si
 | `GET` | `/api/sites/<id>` | none |
 | `GET` | `/api/sites/<id>/versions/<n>/files` → `{"entry", "files": {path: digest}}` | owner or token |
 | `GET` | `/api/sites/<id>/files/<digest>` (original bytes, as a sandboxed download) | owner or token |
+| `GET` | `/api/sites/<id>/hold` → `{"held", "reasons"}` | owner or token |
+
+## Safety checks
+
+- **Executables are refused** (400), by extension (`lib/blocked-files.json`: `.exe`, `.msi`, `.dmg`, `.apk`, `.jar`,
+  `.dll`, `.so`, `.app` folders, ...) and by content (Windows, Linux and Mac programs, APK/JAR zips):
+  `{"error": "Executable files can't be shared: tools/setup.exe"}`.
+- **Held for review:** uploads that look like phishing, a seed-phrase grab or a crypto miner are stored, but the
+  site is held: its links answer **451** until an admin approves it. Create and publish responses include
+  `"held": true, "reasons": [...]` (else `"held": false`).
+
+## Admin
+
+Admins are the `ADMIN_EMAILS` accounts (signed in).
+
+| Method | Path | |
+| --- | --- | --- |
+| `GET` | `/api/admin/holds?status=held` (`approved`, `rejected`, `all`) | held sites, newest first |
+| `POST` | `/api/admin/holds/<site id>` `{"decision": "approve" \| "reject"}` | approve: links work again; reject: unpublished |
 
 ## Account
 
@@ -52,4 +71,4 @@ and sends its choice with every share.
 - **Hidden files:** `.git`, `.env` and other dotfiles are dropped on upload.
 
 Errors come back as `{"error": "..."}` with a matching status: 401/403 for auth, 404, 409 (e.g. deleting the
-live version), 413 (too big or over quota) and 429 (a limit reached).
+live version), 413 (too big or over quota), 429 (a limit reached) and 451 on a held site's links.
