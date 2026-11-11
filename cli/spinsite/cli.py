@@ -230,5 +230,13 @@ def rm(
     out(as_json, run(go), f"Deleted {what}")
 
 
+@app.command()
+def mcp():
+    """Run as an MCP server over stdio (for Claude Code, Claude Desktop, Cursor...). Uses the same login."""
+    from .mcp_server import run as run_mcp  # the MCP SDK loads only for this command
+
+    run_mcp()
+
+
 def main() -> None:
     app()

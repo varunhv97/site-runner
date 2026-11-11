@@ -94,6 +94,9 @@ export default function ApiTokens({
       <button className="small" onClick={create}>
         New token
       </button>
+      <p className="muted">
+        Use it with the <a href="/docs">spinsite CLI or Claude (MCP)</a>.
+      </p>
     </details>
   );
 }

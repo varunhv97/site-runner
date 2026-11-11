@@ -14,7 +14,7 @@ Keep **versions** of each site. Optionally **share** a version via a public link
   Both redirect to the site's own host: `<link name>.sites.spinsite.app/` (its id without a name) and `/@<n>/`.
   One host per site; renaming moves it (visitors' saved data starts fresh).
 - Account API tokens for CLI/MCP clients (create, list, revoke in /app).
-- `spinsite` CLI (`cli/`): deploy, sites, versions, live, rename, rm, usage. (Planned) `spinsite mcp` with the same tools.
+- `spinsite` CLI (`cli/`): deploy, sites, versions, live, rename, rm, usage. `spinsite mcp` serves them as MCP tools; guide at /docs.
 
 ## Key decisions
 - **Local-first.** Nothing leaves the device until you click Share.

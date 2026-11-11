@@ -61,6 +61,9 @@
 - [x] `spinsite` CLI (2026-11-11): `cli/` package (httpx + typer), login/deploy/sites/versions/live/rename/rm/usage,
   `--json`; `tests/test_cli.py`; smoke-tested over real HTTP against a local server
 
+- [x] `spinsite mcp` (2026-11-11): MCP tools over stdio, `tests/test_mcp.py`, stdio smoke test; `/docs` page
+  (token, CLI, Claude Code/Desktop setup), linked from the landing footer and the API tokens panel
+
 ## Next
 - [ ] Deploy the content origin: DNS + second Vercel project (docs/deploying.md), then check a live share link
 - [ ] Submit sites.spinsite.app to the Public Suffix List (until then sites are same-site with each other and the app)
@@ -71,6 +74,5 @@
 - [ ] Add Alembic migrations before the first schema change
 - [ ] Optional expiry for old shares
 - [ ] Publish the CLI (PyPI or `uvx --from git+...`); `spinsite login` device flow instead of pasting a token
-- [ ] `spinsite mcp`: the same commands as MCP tools over stdio (FastMCP); reads files from disk, not tool args
 - [ ] Upload only changed files (digests are content-addressed) to ease the 4MB limit
 - [ ] Larger uploads: client-direct Blob uploads to bypass the 4.5MB function limit
