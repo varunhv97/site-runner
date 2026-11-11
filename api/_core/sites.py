@@ -17,6 +17,7 @@ from sqlalchemy import delete, func, select, union_all, update
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import IntegrityError
 
+from . import holds, scan
 from .db import (
     blobs,
     create_schema,
@@ -206,6 +207,9 @@ class Upload:
 
     def __init__(self, zip_bytes: bytes, entry: str | None = None):
         self.files = extract_zip(zip_bytes)
+        if bad := scan.first_executable(self.files):
+            raise SiteError(f"Executable files can't be shared: {bad}", 400)
+        self.findings = scan.scan_upload(self.files)  # reasons to hold the site for review
         self.manifest = {path: hashlib.sha256(data).hexdigest() for path, data in self.files.items()}
         self.entry = check_entry(self.manifest, entry) if entry else pick_entry(self.manifest)
         self.size = sum(len(b) for b in self.files.values())
@@ -343,12 +347,15 @@ class Sites:
         return [s["id"] for s in await self.user_sites(sub)]
 
     async def resolve(self, ref: str, n: int | None) -> dict:
-        """The version to serve for a random id or link name: version n, or the live one. 404 when none.
+        """The version to serve for a random id or link name: version n, or the live one. 404 when none,
+        451 while the site is held for a safety review (holds.py).
         "current_slug" lets the caller redirect an old link name to the site's current one."""
         await self._ready()
         async with self.engine.connect() as conn:
             site_id, via_slug = await self._site_id_for(conn, ref)
             site = await self._site(conn, site_id)
+            if await holds.is_held(conn, site_id):
+                raise SiteError(holds.HELD_MESSAGE, 451)
             n = site.live if n is None else n
             q = select(versions).where(versions.c.site_id == site_id, versions.c.n == n)
             row = (await conn.execute(q)).first()
@@ -474,6 +481,8 @@ class Sites:
             version_files.insert(), [{"site_id": site_id, "n": n, "path": p, "digest": d} for p, d in manifest.items()]
         )
         await conn.execute(update(sites).where(sites.c.id == site_id).values(live=n))
+        if upload.findings:
+            await holds.add(conn, site_id, n, upload.findings)
         return n
 
     async def create(

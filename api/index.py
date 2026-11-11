@@ -19,7 +19,10 @@ from _core import auth  # noqa: E402
 from _core.frames import FRAME_VERSION, frame_page, wrapper_page  # noqa: E402
 from _core.db import make_engine  # noqa: E402
 from _core.sites import SiteError, Sites, content_type  # noqa: E402
+from _core.sites import is_admin  # noqa: E402
 from _core.storage import StorageError, make_storage, oidc_token  # noqa: E402
+from _core import holds  # noqa: E402
+from _core.holds import HELD_MESSAGE  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("site-runner")
@@ -230,7 +233,7 @@ async def create_site(
         "edit_token": token,
         "url": _share_url(request, _ref(meta)),
         "version_url": _share_url(request, _ref(meta), meta["live"]),
-    }
+    } | await holds.site_status(sites.engine, meta["id"])
 
 
 @app.post("/api/sites/{site_id}/versions")
@@ -250,7 +253,7 @@ async def add_version(
         "site": meta,
         "url": _share_url(request, _ref(meta)),
         "version_url": _share_url(request, _ref(meta), meta["live"]),
-    }
+    } | await holds.site_status(sites.engine, meta["id"])
 
 
 class LiveBody(BaseModel):
@@ -359,6 +362,56 @@ async def get_site(site_id: str):
     return {"site": await sites.public_meta(site_id)}
 
 
+# ---- Safety holds (scan.py flags an upload; holds.py keeps the site private until an admin decides) ----
+
+
+class HoldDecision(BaseModel):
+    decision: str
+
+
+def _admin_for_holds(request: Request) -> dict:
+    user = _current_user(request)
+    if not user:
+        raise SiteError("sign in as an admin", 401)
+    if not is_admin(user):
+        raise SiteError("admins only", 403)
+    return user
+
+
+@app.get("/api/sites/{site_id}/hold")
+async def site_hold(request: Request, site_id: str, authorization: str | None = Header(None)):
+    """{"held": bool, "reasons": [...]} for the owner, so /app can show why links don't work yet."""
+    return await holds.owner_status(sites, site_id, _bearer(authorization), _current_user(request))
+
+
+@app.get("/api/admin/holds")
+async def admin_holds(request: Request, status: str = "held"):
+    """Sites held for review (status=held|approved|rejected|all)."""
+    _admin_for_holds(request)
+    await sites._ready()
+    return {"holds": await holds.list_holds(sites.engine, None if status == "all" else status)}
+
+
+@app.post("/api/admin/holds/{site_id}")
+async def admin_review_hold(request: Request, site_id: str, body: HoldDecision):
+    """approve: the site's links work again. reject: the site is unpublished (an admin takedown)."""
+    _check_origin(request)
+    user = _admin_for_holds(request)
+    if body.decision not in ("approve", "reject"):
+        raise SiteError('decision must be "approve" or "reject"', 400)
+    await sites._ready()
+    if not await holds.review(sites.engine, site_id, body.decision == "approve", user["email"]):
+        raise SiteError("this site has no open hold", 404)
+    if body.decision == "reject":
+        try:
+            await sites.delete(site_id, None, user)
+        except SiteError as e:
+            if e.status != 404:  # already unpublished: nothing left to do
+                raise
+    log.info("hold on site %s: %s by %s", site_id, body.decision, user["email"])
+    return {"ok": True, "site_id": site_id, "decision": body.decision}
+
+
 @app.get("/api/cron/cleanup")
 async def cron_cleanup(authorization: str | None = Header(None)):
     """Daily Vercel Cron job (vercel.json). Vercel sends "Authorization: Bearer $CRON_SECRET"."""
@@ -375,6 +428,12 @@ async def cron_cleanup(authorization: str | None = Header(None)):
 
 def _not_found() -> Response:
     return Response("<h1>404</h1><p>Not found in this site.</p>", 404, media_type="text/html")
+
+
+def _held() -> Response:
+    return Response(
+        f"<h1>451</h1><p>{HELD_MESSAGE}</p>", 451, media_type="text/html", headers={"Cache-Control": "no-store"}
+    )
 
 
 def _is_html(path: str) -> bool:
@@ -398,8 +457,8 @@ async def _locate(prefix: str, ref: str, path: str) -> Response | tuple[dict, st
         return _not_found()
     try:
         version = await sites.resolve(site_id, n)
-    except SiteError:
-        return _not_found()
+    except SiteError as e:
+        return _held() if e.status == 451 else _not_found()
     if version["via_slug"] and version["current_slug"] != version["via_slug"]:
         # an earlier link name of a renamed site: forward to the current one, keeping the version and path
         target = version["current_slug"] + (f"@{vstr}" if pinned else "")
