@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // the taste-skill kit (never edited here) and its local check output
+    "public/assets/**",
+    "public/.taste-skill/**",
   ]),
 ]);
 

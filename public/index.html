@@ -51,8 +51,9 @@
 <link rel="modulepreload" href="/assets/moments/pinned-chapters/moment.js">
 <!-- page CSS: inside visuals only (app-frame recipe, the drawn preview, the drawn share and version cards), one --p-h per card group -->
 <style>
-  /* the client asked for nav links to glide to their section (system.css sets auto; reduced motion still forces auto) */
-  html { scroll-behavior: smooth; }
+  /* the client asked for nav links to glide to their section (system.css sets auto; reduced motion still forces auto).
+     Never while a keyboard focus shows: a Tab must jump at once, so the focused control is on screen as it lands */
+  html:not(:has(:focus-visible)) { scroll-behavior: smooth; }
   /* live, the steps sit top-aligned like every other section's h2 (--padt under the top), not centred, so a nav jump lands on the heading */
   main > #how.is-live > .mo-pc__grid { align-content: start; padding-top: var(--padt); }
   .app.ui { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); margin-top: var(--s-7); background: var(--u-bg); border: 1px solid var(--u-border); border-radius: var(--u-r); box-shadow: var(--u-shadow); }
@@ -106,6 +107,11 @@
   .share-card__copy { color: var(--accent); flex: none; }
   .share-card__head { display: flex; justify-content: space-between; font-weight: 500; }
 
+  /* example sites: real screenshots, read from their top-left corner like a browser window */
+  #examples .panel { --p-h: 340px; }
+  #examples .frame__img { object-position: left top; }
+  @media (max-width: 1279px) { #examples .panel { --p-h: 280px; } }
+  @media (max-width: 639px) { #examples .panel { --p-h: 220px; } }
   /* drawn cards in the 2x2 panels */
   #versions .panel { --p-h: 300px; }
   .mini { position: absolute; left: 32px; right: 32px; top: 40px; background: var(--u-bg); color: var(--u-ink); border: 1px solid var(--u-line); border-radius: 10px; padding: 16px; display: grid; gap: 10px; font-size: 14px; }
@@ -127,12 +133,14 @@
     #versions { --h: 1; }
     #versions > .wrap { display: flex; flex-direction: column; row-gap: var(--s-5); }
     #versions .panel { --p-h: calc((100svh - 700px) / 2); }
-    .token-shot { padding: var(--s-4); }
+    .token-shot { padding: var(--s-4); min-height: calc(100svh - 660px); }
+    #examples .panel { --p-h: max(280px, calc(100svh - 780px)); }
     .token-shot .mini__row { flex-wrap: wrap; row-gap: 4px; }
     #faq .grid > .span-5 { grid-column: 1 / span 5; }
     #faq .grid > .faq { grid-column: 7 / span 6; }
   }
   .token-shot { margin-top: var(--s-6); padding: var(--s-6); background: var(--ground-bg); border-radius: var(--r-md); display: grid; place-items: center; }
+  @media (min-width: 1024px) { .token-shot { min-height: max(320px, calc(100svh - 440px)); } }
   .token-shot > .mini--static { position: static; width: min(100%, 380px); margin-inline: auto; justify-self: center; }
   @media (max-width: 639px) { #versions .panel { --p-h: 160px; } .mini { left: 16px; right: 16px; top: 16px; padding: 12px; } .mini__row { padding: 5px 0; } }
 </style>
@@ -150,6 +158,7 @@
       <div class="nav__item"><a class="nav__link" href="#app">App</a></div>
       <div class="nav__item"><a class="nav__link" href="#how">Steps</a></div>
       <div class="nav__item"><a class="nav__link" href="#versions">Versions</a></div>
+      <div class="nav__item"><a class="nav__link" href="#examples">Examples</a></div>
       <div class="nav__item"><a class="nav__link" href="#faq">Questions</a></div>
     </nav>
     <div class="nav__actions">
@@ -302,12 +311,12 @@
           </li>
           <li class="mo-pc__step">
             <h3>Share one version of the site</h3>
-            <p>Share uploads that one version and gives you two links: one that follows the live version and one pinned to it.</p>
+            <p>Sign in with Google and Share uploads that one version. You get two links: one that follows the live version and one pinned to it. Pick a link name or keep a random one.</p>
             <figure class="mo-pc__visual"><div class="shot">
               <div class="ui ui-panel share-card" role="img" aria-label="The two share links for version 3 of the trail map">
                 <div class="share-card__head"><span>Trail map, version 3</span><span class="mini__live">Live</span></div>
-                <div class="share-card__row"><span class="share-card__label">Live link, follows the live version</span><span class="share-card__link"><span>/s/k76y45tw25/</span><span class="share-card__copy">Copy</span></span></div>
-                <div class="share-card__row"><span class="share-card__label">Pinned link, always version 3</span><span class="share-card__link"><span>/s/k76y45tw25@3/</span><span class="share-card__copy">Copy</span></span></div>
+                <div class="share-card__row"><span class="share-card__label">Live link, follows the live version</span><span class="share-card__link"><span>/s/trail-map/</span><span class="share-card__copy">Copy</span></span></div>
+                <div class="share-card__row"><span class="share-card__label">Pinned link, always version 3</span><span class="share-card__link"><span>/s/trail-map@3/</span><span class="share-card__copy">Copy</span></span></div>
               </div>
             </div></figure>
           </li>
@@ -344,9 +353,9 @@
             <p>Add @3 to a share link and it always opens version 3, even after you publish version 4.</p>
             <div class="panel">
               <div class="ui ui-panel mini" role="img" aria-label="A live link and a link pinned to version 3">
-                <div class="mini__row"><span class="mini__mono">/s/k76y45tw25/</span><span class="mini__live">Version 4</span></div>
-                <div class="mini__row"><span class="mini__mono">/s/k76y45tw25@3/</span><span>Version 3</span></div>
-                <div class="mini__row"><span class="mini__mono">/s/k76y45tw25@1/</span><span>Version 1</span></div>
+                <div class="mini__row"><span class="mini__mono">/s/trail-map/</span><span class="mini__live">Version 4</span></div>
+                <div class="mini__row"><span class="mini__mono">/s/trail-map@3/</span><span>Version 3</span></div>
+                <div class="mini__row"><span class="mini__mono">/s/trail-map@1/</span><span>Version 1</span></div>
               </div>
             </div>
           </article>
@@ -380,13 +389,37 @@
     </div>
   </section>
 
+  <section class="section ground-surface" id="examples" aria-labelledby="examples-h">
+    <div class="wrap">
+      <div class="group">
+        <div class="section-head">
+          <h2 id="examples-h">Two sites running on Site Runner. <span class="muted">Open them as a visitor would.</span></h2>
+        </div>
+        <div class="grid">
+          <article class="card card--row card--open span-6">
+            <h3>A SQL course in the browser</h3>
+            <p>30 lessons and quizzes on a small café’s data. Queries run in the tab, and your progress stays saved.</p>
+            <a class="link" href="https://spinsite.vercel.app/s/learn-sql/" target="_blank" rel="noopener">Open Learn SQL</a>
+            <div class="panel"><img class="frame__img" src="/examples/learn-sql.jpg" width="1280" height="800" loading="lazy" decoding="async" alt="Learn SQL’s home page: the lesson list, the course title and a query on the café’s menu with its results"></div>
+          </article>
+          <article class="card card--row card--open span-6">
+            <h3>An engagement ring try-on</h3>
+            <p>Pick a stone, a shape and a setting and see the ring on an animated hand, with the 4 Cs explained as you choose.</p>
+            <a class="link" href="https://spinsite.vercel.app/s/ring-studio/" target="_blank" rel="noopener">Open Ring Studio</a>
+            <div class="panel"><img class="frame__img" src="/examples/ring-studio.jpg" width="1280" height="800" loading="lazy" decoding="async" alt="Ring Studio: a diamond solitaire on an animated hand beside the gemstone, origin and shape choices"></div>
+          </article>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="section" id="faq" style="--hm: 2" aria-labelledby="faq-h">
     <div class="wrap">
       <div class="grid grid--top">
         <div class="span-5 stack-4">
           <h2 id="faq-h">Questions</h2>
           <p class="muted">About files, limits and who can publish.</p>
-          <a class="link" href="mailto:hello@siterunner.example">Email a question</a>
+          <a class="link" href="https://github.com/varunhv97/site-runner/issues" target="_blank" rel="noopener">Ask a question</a>
           <div class="token-shot frame">
             <div class="ui ui-panel mini mini--static" role="img" aria-label="The edit token for the trail map site, kept in this browser">
               <div class="mini__row"><span>Trail map · edit token</span><span class="mini__live">Saved here</span></div>
@@ -398,10 +431,10 @@
           </div>
         </div>
         <div class="faq span-6 start-7">
-          <div class="faq__item"><h3>Does my site leave my computer?</h3><p>Not until you press Share. Before that they stay in your browser’s storage, and the preview runs from there.</p></div>
+          <div class="faq__item"><h3>Does my site leave my computer?</h3><p>Not until you share it. Until then its files stay in your browser, and the preview runs from there.</p></div>
           <div class="faq__item"><h3>How big can a shared site be?</h3><p>Up to 4 MB zipped, 50 MB unzipped and 2,000 files. Local previews are limited only by your browser’s storage.</p></div>
-          <div class="faq__item"><h3>Who can publish to my shared site?</h3><p>Whoever holds its edit token. Site Runner creates it on the first share and keeps it in your browser; there are no accounts.</p></div>
-          <div class="faq__item"><h3>What if I clear my browser data?</h3><p>Local sites and their versions go with it. Shared versions stay online, but you lose the token that publishes new ones.</p></div>
+          <div class="faq__item"><h3>Who can publish to my shared site?</h3><p>You, signed in with the Google account that shared it. Its edit token also publishes, for scripts and API clients, and you can replace it in the app.</p></div>
+          <div class="faq__item"><h3>What if I clear my browser data?</h3><p>Local sites and saved edit tokens go with it. Shared links keep working, but publishing to them needs the token, so keep a copy.</p></div>
         </div>
       </div>
     </div>
@@ -413,7 +446,7 @@
     <div class="closing__cta close--type">
       <div class="section-head">
         <h2 id="close-h">Run your first prototype in the browser</h2>
-        <p class="t-small muted">Free, no account, and nothing leaves your browser until you share.</p>
+        <p class="t-small muted">Free. No account to run sites, and nothing leaves your browser until you sign in and share.</p>
       </div>
       <a class="btn btn--primary btn--xl btn--wide" href="/app" data-signed-in-label="My sites">Try Site Runner<svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
     </div>
@@ -423,11 +456,11 @@
           <a class="nav__logo" href="#top"><span class="mark" data-mark="arc" aria-hidden="true"></span>Site Runner</a>
           <p class="footer__lede">Runs HTML sites in your browser and shares them as links.</p>
         </div>
-        <div class="span-2 start-9 footer__col"><h3>Product</h3><ul><li><a href="#app">App window</a></li><li><a href="#how">Steps</a></li><li><a href="#versions">Versions</a></li></ul></div>
-        <div class="span-2 footer__col"><h3>Help</h3><ul><li><a href="#faq">Questions</a></li><li><a href="mailto:hello@siterunner.example">Email us</a></li></ul></div>
+        <div class="span-2 start-9 footer__col"><h3>Product</h3><ul><li><a href="#app">App window</a></li><li><a href="#how">Steps</a></li><li><a href="#versions">Versions</a></li><li><a href="#examples">Examples</a></li></ul></div>
+        <div class="span-2 footer__col"><h3>Help</h3><ul><li><a href="#faq">Questions</a></li><li><a href="https://github.com/varunhv97/site-runner/issues" target="_blank" rel="noopener">Contact us</a></li><li><a href="https://github.com/varunhv97/site-runner" target="_blank" rel="noopener">View the code</a></li></ul></div>
       </div>
       <div class="footer__legal">
-        <span>&copy; 2026 Site Runner</span>
+        <span>&copy; 2026 Site Runner · Made by <a href="https://www.linkedin.com/in/varunhv/" target="_blank" rel="noopener">Varun</a></span>
         <div class="socials"></div>
       </div>
     </div>
