@@ -56,6 +56,10 @@
   html:not(:has(:focus-visible)) { scroll-behavior: smooth; }
   /* live, the steps sit top-aligned like every other section's h2 (--padt under the top), not centred, so a nav jump lands on the heading */
   main > #how.is-live > .mo-pc__grid { align-content: start; padding-top: var(--padt); }
+  /* the steps follow the scroll; a click on one scrolls to it (script at the end), so they answer the pointer */
+  #how.is-live .mo-pc__step { cursor: pointer; }
+  #how.is-live .mo-pc__step:not(.is-on):hover { border-left-color: var(--line-strong); }
+  #how.is-live .mo-pc__step:not(.is-on):hover h3 { color: var(--ink); }
   .app.ui { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); margin-top: var(--s-7); background: var(--u-bg); border: 1px solid var(--u-border); border-radius: var(--u-r); box-shadow: var(--u-shadow); }
   .app > .app__pane { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
   .app > .app__pane + .app__pane { border-left: 1px solid var(--u-line); }
@@ -487,6 +491,36 @@
       });
     })
     .catch(() => {});
+
+  // The three steps (#how) open one by one as the page scrolls. A click (or Enter on a focused step) scrolls
+  // to where that step is open, the same as scrolling there. Only while the steps follow the scroll: the
+  // static layouts (phones, reduced motion) show every step already.
+  (() => {
+    const root = document.getElementById("how");
+    if (!root) return;
+    const steps = [...root.querySelectorAll(".mo-pc__step")];
+    const live = () => root.classList.contains("is-live");
+    const go = (i) => {
+      if (!live()) return;
+      // the moment opens step i while (scrolled past the top) / (height - one screen) is in [i/n, (i+1)/n)
+      const r = root.getBoundingClientRect();
+      const run = Math.max(1, r.height - innerHeight);
+      scrollTo({ top: scrollY + r.top + ((i + 0.5) / steps.length) * run, behavior: "smooth" });
+    };
+    steps.forEach((step, i) => {
+      step.addEventListener("click", () => go(i));
+      step.querySelector("h3").addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          go(i);
+        }
+      });
+    });
+    const sync = () =>
+      steps.forEach((s) => (live() ? s.querySelector("h3").setAttribute("tabindex", "0") : s.querySelector("h3").removeAttribute("tabindex")));
+    new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ["class"] });
+    sync();
+  })();
 </script>
 <script type="module" src="/assets/system.js"></script>
 <script type="module" src="/assets/motion/motion.js"></script>
