@@ -45,22 +45,12 @@
 <link rel="stylesheet" href="/assets/ui/notify/fragment.css">
 <script>document.documentElement.classList.add('m-enter');setTimeout(()=>document.documentElement.classList.add('m-enter-done'),700)</script>
 <script src="/assets/backgrounds/backgrounds.js"></script>
-<script>document.documentElement.classList.add('mo-js');setTimeout(()=>document.documentElement.classList.add('mo-safe'),2500)</script>
-<link rel="modulepreload" href="/assets/moments/moments.js">
-<link rel="modulepreload" href="/assets/moments/lib.js">
-<link rel="modulepreload" href="/assets/moments/pinned-chapters/moment.js">
 <!-- page CSS: inside visuals only (app-frame recipe, the drawn preview, the drawn share and version cards), one --p-h per card group -->
 <style>
   /* the client asked for nav links to glide to their section (system.css sets auto; reduced motion still forces auto).
      Never while a keyboard focus shows: a Tab must jump at once, so the focused control is on screen as it lands */
   html:not(:has(:focus-visible)) { scroll-behavior: smooth; }
   /* live, the steps sit top-aligned like every other section's h2 (--padt under the top), not centred, so a nav jump lands on the heading */
-  main > #how.is-live > .mo-pc__grid { align-content: start; padding-top: var(--padt); }
-  /* one track down the steps with the open step lit on it, so the steps read as progress, not as three tabs */
-  #how.is-live .mo-pc__steps { position: relative; }
-  #how.is-live .mo-pc__steps::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--line); }
-  #how.is-live .mo-pc__step { position: relative; border-left-color: transparent; }
-  #how.is-live .mo-pc__step.is-on { border-left-color: var(--accent); }
   .app.ui { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); margin-top: var(--s-7); background: var(--u-bg); border: 1px solid var(--u-border); border-radius: var(--u-r); box-shadow: var(--u-shadow); }
   .app > .app__pane { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
   .app > .app__pane + .app__pane { border-left: 1px solid var(--u-line); }
@@ -97,10 +87,11 @@
 
   /* the three drawn step screens of the pinned chapters */
   .shot { width: 100%; aspect-ratio: 4 / 3; background: var(--ground-bg); display: grid; place-items: center; padding: 28px; }
-  [data-moment="pinned-chapters"].is-live .shot { height: 100%; aspect-ratio: auto; }
-  [data-moment="pinned-chapters"]:not(.is-live) .shot { aspect-ratio: auto; height: 30svh; }
-  @media (min-width: 640px) and (max-width: 1023px) { [data-moment="pinned-chapters"]:not(.is-live) .shot { height: 50svh; } }
-  @media (max-width: 639px) { [data-moment="pinned-chapters"]:not(.is-live) .shot { height: 35svh; padding: 16px; } }
+  /* the three step cards: each picture fills its panel */
+  #how .panel { --p-h: 320px; }
+  #how .shot { height: 100%; aspect-ratio: auto; background: none; padding: 24px; }
+  #how .ui-files__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 639px) { #how .panel { --p-h: 260px; } #how .shot { padding: 16px; } #how .ui-file { height: 108px; } }
 
   .shot .ui-files { width: min(100%, 520px); }
   .shot .pv { width: min(100%, 560px); height: auto; border: 1px solid var(--u-line); border-radius: 10px; overflow: hidden; }
@@ -129,8 +120,6 @@
   .mini__btn { padding: 4px 10px; border: 1px solid var(--u-line); border-radius: 99px; font-size: 13px; }
   @media (max-width: 1279px) { #versions .panel { --p-h: 250px; } }
   /* at rest the moment sets the section to its content height; hold it to its two screens (--h, --hm on a phone) */
-  @media (min-width: 640px) { main > #how[data-moment]:not(.is-live) { height: calc(var(--h) * 100svh); } }
-  @media (max-width: 639px) { main > #how[data-moment]:not(.is-live) { height: auto; min-height: calc(var(--hm) * 100lvh); } }
   @media (max-width: 639px) { .token-shot { min-height: 78svh; } }
   /* the tablet stacks the 2x2 one card a row: the panels share what each screen leaves */
   /* the tablet fits the four cards on one screen (shorter panels) and keeps the FAQ in two columns */
@@ -154,7 +143,7 @@
 <!-- type: software
      deal: hero split, nav nav-centre, close close-type, footer footer-dark, rhythm surface-pairs, buttons pill, mark arc, ground sage,
            palette forest-pale-lime, type gabarito (epilogue failed hero-lines: 4 lines at 45 characters), radius sharp; effect gradient-mesh (the hero frame); card grounds: none
-     moments: pinned-chapters (#how) -->
+     moments: none (the client removed the pinned-chapters steps on 2026-11-11; the steps are static cards) -->
 <header class="nav nav--centre">
   <div class="wrap nav__bar">
     <a class="skip-link" href="#top">Skip to content</a>
@@ -278,15 +267,18 @@
     </div>
   </section>
 
-  <section class="section" id="how" style="--h: 2; --hm: 2" data-moment="pinned-chapters" aria-labelledby="how-h">
-    <div class="wrap mo-pc__grid">
-      <div class="mo-pc__text">
-        <h2 id="how-h">From a zip to a link in 3 steps</h2>
-        <ol class="mo-pc__steps">
-          <li class="mo-pc__step">
+  <section class="section" id="how" style="--hm: 2" aria-labelledby="how-h">
+    <div class="wrap">
+      <div class="group">
+        <div class="section-head">
+          <h2 id="how-h">From a zip to a link in 3 steps</h2>
+        </div>
+        <div class="grid">
+          <article class="card card--row span-4 m-nolift">
+            <span class="step-num">1</span>
             <h3>Drop the site’s files in</h3>
-            <p>Drag a folder, a zip or a single HTML file onto the page. It unzips in the tab and nothing is uploaded.</p>
-            <figure class="mo-pc__visual"><div class="shot">
+            <p>Drag a folder, a zip or one HTML file onto the page. Nothing is uploaded.</p>
+            <div class="panel panel--flush"><div class="shot">
               <div class="ui ui-files" data-ui="files" data-ui-still data-reading="Unzipping {n} of {total}">
                 <div class="ui-files__status"><span class="ui-dot"></span><span data-files-status>6 files ready</span></div>
                 <ul class="ui-files__grid">
@@ -298,12 +290,13 @@
                   <li class="ui-file is-done"><span class="ui-file__icon"><img data-icon="file:json" src="/assets/icons/json.svg" alt=""></span><span class="ui-file__name">route.json</span><span class="ui-file__kind">JSON</span><span class="ui-file__bar"><i></i></span><span class="ui-file__check"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></li>
                 </ul>
               </div>
-            </div></figure>
-          </li>
-          <li class="mo-pc__step">
+            </div></div>
+          </article>
+          <article class="card card--row span-4 m-nolift">
+            <span class="step-num">2</span>
             <h3>Check the site in the preview</h3>
-            <p>Your files are served from browser storage, so relative links, images and scripts load as they would online.</p>
-            <figure class="mo-pc__visual"><div class="shot">
+            <p>It runs from your browser’s storage, with links, images and scripts working as online.</p>
+            <div class="panel panel--flush"><div class="shot">
               <div class="ui ui-panel pv" role="img" aria-label="The trail map site running in the preview">
                 <div class="pv__bar"><span class="ui-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="pv__url">/preview/trail-map/1/</span><span class="pv__tag">v1</span></div>
                 <div class="pv__page">
@@ -312,22 +305,22 @@
                   <svg class="pv__chart" viewBox="0 0 600 150" aria-hidden="true"><path d="M0 130 L60 118 L120 96 L170 104 L230 62 L290 40 L340 52 L400 28 L450 58 L510 84 L560 112 L600 126 L600 150 L0 150 Z" fill="#cfdcc4"/><path d="M0 130 L60 118 L120 96 L170 104 L230 62 L290 40 L340 52 L400 28 L450 58 L510 84 L560 112 L600 126" fill="none" stroke="#2f5a32" stroke-width="2.5"/></svg>
                 </div>
               </div>
-            </div></figure>
-          </li>
-          <li class="mo-pc__step">
+            </div></div>
+          </article>
+          <article class="card card--row span-4 m-nolift">
+            <span class="step-num">3</span>
             <h3>Share one version of the site</h3>
-            <p>Sign in with Google and Share uploads that one version. You get two links: one that follows the live version and one pinned to it. Pick a link name or keep a random one.</p>
-            <figure class="mo-pc__visual"><div class="shot">
+            <p>Sign in with Google and share it. You get a live link and a link pinned to that version.</p>
+            <div class="panel panel--flush"><div class="shot">
               <div class="ui ui-panel share-card" role="img" aria-label="The two share links for version 3 of the trail map">
                 <div class="share-card__head"><span>Trail map, version 3</span><span class="mini__live">Live</span></div>
                 <div class="share-card__row"><span class="share-card__label">Live link, follows the live version</span><span class="share-card__link"><span>/s/trail-map/</span><span class="share-card__copy">Copy</span></span></div>
                 <div class="share-card__row"><span class="share-card__label">Pinned link, always version 3</span><span class="share-card__link"><span>/s/trail-map@3/</span><span class="share-card__copy">Copy</span></span></div>
               </div>
-            </div></figure>
-          </li>
-        </ol>
+            </div></div>
+          </article>
+        </div>
       </div>
-      <div class="mo-pc__visuals frame"></div>
     </div>
   </section>
 
