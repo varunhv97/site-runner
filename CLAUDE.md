@@ -8,7 +8,7 @@ Read `requirements.md`, `architecture.md`, `tasks.md` at session start. Update `
 - Python venv: `venv/` (direnv auto-activates). Install: `pip3 install -r requirements-dev.txt`
 - API: `npm run dev:api` (FastAPI on :8000). Content: `npm run dev:uc` (:8001, `*.usercontent.localhost`).
   Web: `npm run dev` (Next on :3000, proxies /api and /s to :8000)
-- Tests: `pytest -q` and `node --test tests/path_rules.test.mjs`. Format: `black api tests`.
+- Tests: `pytest -q` and `node --test tests/path_rules.test.mjs`. Format: `black api tests cli`.
   Lint/types: `npx eslint . && npx tsc --noEmit`
 
 ## Rules

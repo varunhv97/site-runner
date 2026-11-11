@@ -48,3 +48,4 @@ shots/
 public/.taste-skill/
 !.env.example
 uc-static/
+*.egg-info/

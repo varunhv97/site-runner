@@ -4,6 +4,18 @@ The app's own frontend uses this API, and scripts or other tools can too. Writes
 the app's own origin exactly (shared sites and previews have their own origins and are refused). Scripts send no `Origin` header and authenticate with a site's **edit token**:
 `Authorization: Bearer <edit token>`. The site's owner can see and replace the token in `/app`.
 
+An **account API token** (`srk_...`, made in `/app` → API tokens) acts as the account instead: "signed in" and
+"owner" below accept it. It can't do admin work or manage tokens. The [`spinsite` CLI](../cli/README.md) uses one.
+
+## Account
+
+| Method | Path | Auth |
+| --- | --- | --- |
+| `GET` | `/api/auth/me` | signed in or API token |
+| `GET` | `/api/me/sites` (each with its versions) · `/api/me/usage` | signed in or API token |
+| `GET` · `POST` | `/api/me/tokens` (`{"name"}` → `{"token", "secret"}`, shown once) | signed in (browser only) |
+| `DELETE` | `/api/me/tokens/<id>` | signed in (browser only) |
+
 ## Sites
 
 | Method | Path | Auth |

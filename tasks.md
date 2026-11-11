@@ -58,6 +58,9 @@
 - [x] Account API tokens (2026-11-11): `srk_…` bearer acts as the account (create/list/revoke from a browser
   session only, never admin, bans apply); panel in /app; `tests/test_api_tokens.py`
 
+- [x] `spinsite` CLI (2026-11-11): `cli/` package (httpx + typer), login/deploy/sites/versions/live/rename/rm/usage,
+  `--json`; `tests/test_cli.py`; smoke-tested over real HTTP against a local server
+
 ## Next
 - [ ] Deploy the content origin: DNS + second Vercel project (docs/deploying.md), then check a live share link
 - [ ] Submit sites.spinsite.app to the Public Suffix List (until then sites are same-site with each other and the app)
@@ -67,8 +70,7 @@
 - [ ] Optional: a Neon `dev` branch for testing against real Postgres
 - [ ] Add Alembic migrations before the first schema change
 - [ ] Optional expiry for old shares
-- [ ] `spinsite` CLI (Python, httpx + typer, pipx/uvx): login (paste token; device flow later), deploy ./dir,
-  sites, versions, live, rm, rename, usage. Needs a versions-list endpoint for the account
+- [ ] Publish the CLI (PyPI or `uvx --from git+...`); `spinsite login` device flow instead of pasting a token
 - [ ] `spinsite mcp`: the same commands as MCP tools over stdio (FastMCP); reads files from disk, not tool args
 - [ ] Upload only changed files (digests are content-addressed) to ease the 4MB limit
 - [ ] Larger uploads: client-direct Blob uploads to bypass the 4.5MB function limit

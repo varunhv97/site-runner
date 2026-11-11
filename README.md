@@ -47,7 +47,7 @@ files.
 
 - [Running it locally](docs/development.md)
 - [Configuration](docs/configuration.md)
-- [API](docs/api.md)
+- [API](docs/api.md) and the [`spinsite` CLI](cli/README.md)
 - [Deploying](docs/deploying.md)
 - [Architecture](architecture.md)
 

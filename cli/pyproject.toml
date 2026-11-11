@@ -1,0 +1,24 @@
+[project]
+name = "spinsite"
+version = "0.1.0"
+description = "Publish and manage Site Runner (spinsite.app) sites from the command line"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "httpx>=0.28",
+    "typer>=0.15",
+]
+
+[project.scripts]
+spinsite = "spinsite.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["spinsite"]
+
+[tool.black]
+line-length = 120
