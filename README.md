@@ -85,3 +85,11 @@ versions counts once). Hidden files (`.git`, `.env`, ...) are dropped on upload.
 - Local previews run on the app's origin, so a malicious zip you preview yourself could read tokens stored in
   your browser. Shared links are sandboxed. Fix: serve previews from a separate origin.
 - Unpublished sites' files are deleted by the daily cleanup job once no other site uses them.
+
+## Security
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
+## License
+
+MIT, see [LICENSE](LICENSE). The design kit in `public/assets` has its own licence (`public/assets/LICENSE`).

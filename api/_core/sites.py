@@ -227,12 +227,13 @@ class Sites:
         async with self.engine.begin() as conn:
             await conn.execute(stmt.on_conflict_do_update(index_elements=["sub"], set_={"email": stmt.excluded.email}))
 
-    async def _count_upload(self, conn, user: dict | None) -> None:
-        """Atomically count a signed-in upload against today's limit."""
-        if not user:
+    async def _count_upload(self, conn, key: str | None) -> None:
+        """Atomically count an upload against today's limit. key: a user's sub, or "site:<id>" for an
+        edit-token upload to a site with no owner."""
+        if not key:
             return
         day = time.strftime("%Y-%m-%d", time.gmtime())
-        stmt = self._upsert(uploads).values(sub=user["sub"], day=day, count=1)
+        stmt = self._upsert(uploads).values(sub=key, day=day, count=1)
         stmt = stmt.on_conflict_do_update(index_elements=["sub", "day"], set_={"count": uploads.c.count + 1}).returning(
             uploads.c.count
         )
@@ -486,7 +487,7 @@ class Sites:
                 ).scalar_one()
                 if count >= MAX_SITES_PER_USER:
                     raise SiteError(f"you have {MAX_SITES_PER_USER} shared sites, the most an account can have", 429)
-                await self._count_upload(conn, owner)
+                await self._count_upload(conn, owner["sub"] if owner else None)
             await conn.execute(
                 sites.insert().values(
                     id=site_id,
@@ -546,7 +547,8 @@ class Sites:
                         "Delete old versions to make room.",
                         429,
                     )
-                await self._count_upload(conn, user)
+                # the publisher, else (an edit token) the site's owner, else the site itself
+                await self._count_upload(conn, user["sub"] if user else site.owner or f"site:{site_id}")
                 await self._add_version(conn, site_id, upload, note)
                 return await self.public_meta(site_id, conn)
         except IntegrityError as e:  # two publishes raced for the same version number (SQLite has no row lock)

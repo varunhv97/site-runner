@@ -28,7 +28,13 @@
 - [x] Storage quota per account (250MB, `STORAGE_QUOTA_MB`, unique files) + `GET /api/me/usage` + usage line in /app;
   delete a non-live shared version (`DELETE /api/sites/<id>/versions/<n>`, numbers never reused); `tests/test_quota.py`
 
+- [x] Hardening (2026-11-10): sign-in `next` refuses backslashes/control chars (open redirect), token-only
+  uploads count toward the daily limit (owner, else `site:<id>`), /api/health minimal in production, total cap
+  on shared sites' saved data, MIT LICENSE, SECURITY.md
+
 ## Next
+- [ ] **HIGH PRIORITY:** serve local previews from a separate origin. Today a malicious zip previewed locally
+  runs same-origin as the app and can read the edit tokens in IndexedDB
 - [ ] Delete the old public store `site-runner-blob` in the dashboard (CLI needs an interactive confirm)
 - [ ] Disconnect Development from site-runner-db and site-runner-private (local dev uses SQLite + .data)
 - [ ] Optional: a Neon `dev` branch for testing against real Postgres
@@ -36,9 +42,7 @@
 - [ ] Pre-share warning + secret scan (API keys in JS); optional expiry for old shares
 - [ ] "Your shared sites" list in /app (server side exists: /api/me/sites)
 - [ ] Report-abuse link and contact address
-- [ ] Production (`site-runner-omega.vercel.app`) is public and runs the first, broken build (API 500s). Don't `--prod` until safety items are done
 - [ ] MCP server (Python FastMCP): create_site, upload_version, list_versions, set_live, diff_versions
 - [ ] Serve shared content from a separate domain (stronger isolation; would replace the localStorage bridge)
-- [ ] Local preview runs same-origin as the app. Use a separate preview origin to isolate untrusted zips
 - [ ] Bridge gaps: IndexedDB and cookies aren't saved; popups opened by a shared site get no saved storage
 - [ ] Larger uploads: client-direct Blob uploads to bypass the 4.5MB function limit

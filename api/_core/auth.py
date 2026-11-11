@@ -74,8 +74,20 @@ def verify(value: str | None) -> dict | None:
 def new_state(next_path: str) -> tuple[str, str]:
     """(state for the Google URL, signed cookie value that remembers it and where to go after)."""
     state = secrets.token_urlsafe(24)
-    safe_next = next_path if next_path.startswith("/") and not next_path.startswith("//") else "/app"
-    return state, sign({"state": state, "next": safe_next, "exp": int(time.time()) + STATE_TTL})
+    return state, sign({"state": state, "next": safe_next(next_path), "exp": int(time.time()) + STATE_TTL})
+
+
+def safe_next(next_path: str) -> str:
+    """Only a path on this site. Browsers read "/\\evil.com" as "//evil.com" (another host) and drop tabs and
+    newlines from URLs, so backslashes and control characters are refused along with "//" and non-paths."""
+    if (
+        not next_path.startswith("/")
+        or next_path.startswith("//")
+        or "\\" in next_path
+        or any(ord(c) < 0x20 or ord(c) == 0x7F for c in next_path)
+    ):
+        return "/app"
+    return next_path
 
 
 def login_url(state: str, redirect_uri: str) -> str:

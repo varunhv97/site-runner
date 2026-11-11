@@ -148,3 +148,24 @@ def test_blob_storage_credentials(monkeypatch):
     oidc_token.set("request-token")
     assert oidc._auth()["authorization"] == "Bearer request-token"
     assert oidc._auth()["x-vercel-blob-store-id"] == "S7RKoWvKj"
+
+
+def test_token_uploads_to_ownerless_sites_have_a_daily_limit(client, monkeypatch):
+    import _core.sites as core
+
+    monkeypatch.setattr(core, "MAX_UPLOADS_PER_DAY", 2)
+    body = create(client, {"index.html": "v1"})  # no sign-in on this server, so the site has no owner
+    sid, auth = body["site"]["id"], {"Authorization": f"Bearer {body['edit_token']}"}
+    v = {"file": ("s.zip", make_zip({"index.html": "v2"}))}
+    for _ in range(2):
+        assert client.post(f"/api/sites/{sid}/versions", files=v, headers=auth).status_code == 200
+    assert client.post(f"/api/sites/{sid}/versions", files=v, headers=auth).status_code == 429
+    other = create(client, {"index.html": "x"})  # counted per site, so another site isn't blocked
+    o = {"Authorization": f"Bearer {other['edit_token']}"}
+    assert client.post(f"/api/sites/{other['site']['id']}/versions", files=v, headers=o).status_code == 200
+
+
+def test_health_says_less_in_production(client, monkeypatch):
+    assert {"storage", "database", "oidc_header"} <= client.get("/api/health").json().keys()
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    assert client.get("/api/health").json() == {"ok": True, "storage_reachable": True}

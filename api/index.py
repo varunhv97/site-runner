@@ -113,6 +113,8 @@ async def health(request: Request):
         await sites.storage.get("health/probe")
     except StorageError:
         storage_ok = False
+    if os.environ.get("VERCEL_ENV") == "production":
+        return {"ok": True, "storage_reachable": storage_ok}  # no details about the setup in public
     return {
         "ok": True,
         "storage": type(sites.storage).__name__,

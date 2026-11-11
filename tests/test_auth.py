@@ -199,3 +199,36 @@ def test_link_names_cannot_shadow_ids(client, monkeypatch):
     sign_in(client, monkeypatch, BOB)
     assert share_named(client, sid).status_code == 409  # someone's random id is not a free name
     assert page(client, f"/s/{sid}/") == "v1"
+
+
+def login_then_callback(client, monkeypatch, next_path):
+    """Where the callback sends the browser after signing in with ?next=next_path."""
+
+    async def fake_fetch(code, redirect_uri):
+        return ALICE
+
+    monkeypatch.setattr(auth, "fetch_google_user", fake_fetch)
+    r = client.get("/api/auth/login", params={"next": next_path}, follow_redirects=False)
+    state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
+    r = client.get(f"/api/auth/callback?code=c&state={state}", follow_redirects=False)
+    return r.headers["location"]
+
+
+def test_next_only_redirects_within_this_site(client, monkeypatch):
+    for evil in ("/\\evil.com", "//evil.com", "https://evil.com", "/\t/evil.com", "/\\/evil.com"):
+        assert login_then_callback(client, monkeypatch, evil) == "/app", evil
+    assert login_then_callback(client, monkeypatch, "/app?x=1") == "/app?x=1"
+
+
+def test_token_uploads_count_against_the_owners_daily_limit(client, monkeypatch):
+    import _core.sites as core
+
+    monkeypatch.setattr(core, "MAX_UPLOADS_PER_DAY", 3)
+    sign_in(client, monkeypatch, ALICE)
+    body = share(client).json()  # upload 1, charged to Alice
+    client.cookies.clear()  # from here on only the edit token, no session
+    token = {"Authorization": f"Bearer {body['edit_token']}"}
+    v = {"file": ("s.zip", make_zip({"index.html": "v2"}))}
+    for _ in range(2):  # uploads 2 and 3
+        assert client.post(f"/api/sites/{body['site']['id']}/versions", files=v, headers=token).status_code == 200
+    assert client.post(f"/api/sites/{body['site']['id']}/versions", files=v, headers=token).status_code == 429
