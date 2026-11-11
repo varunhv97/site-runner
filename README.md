@@ -1,95 +1,54 @@
 # Site Runner
 
-Run HTML prototypes in your browser, keep every upload as a version, and share the one you pick as a link.
-Live at [spinsite.app](https://spinsite.app).
+**Run HTML prototypes in your browser and share them as a link.** Try it at **[spinsite.app](https://spinsite.app)**.
 
-- **Local first.** Drop in HTML files, a folder or a zip. A Service Worker serves them from IndexedDB, so
-  relative links, CSS and scripts work, and nothing is uploaded until you press Share.
-- **Versions.** Every upload is a version. Shared sites have a live link that follows the live version and
-  pinned links (`@3`). Rolling back moves the live pointer.
-- **Link names.** Pick a name like `/s/learn-sql/`, unique across all users. Names are never reused; after a
-  rename the old name forwards to the new one.
-- **Sign in with Google to share.** Owners publish, roll back, unpublish and replace edit tokens. Edit tokens
-  also work for API and MCP clients.
-- **Sandboxed.** Shared pages run with `Content-Security-Policy: sandbox` (no origin of their own), so they
-  can't read the app's cookies or tokens. Their localStorage is still saved, per site, by a small wrapper page.
+Drop in a folder, a zip or a single HTML file and it runs straight away in the tab, with its styles, scripts,
+images and links working as they would on a real server. Every upload is kept as a version, and when you're
+ready you can share the one you pick.
 
-## Stack
+## What you can do
 
-Next.js 16 (the tool at `/app`), a static landing page at `/` (`public/index.html`, built with the
-taste-skill kit in `public/assets`), FastAPI as a Vercel Python function (`api/`), Postgres (Neon) for metadata and a private Vercel Blob store for files.
-See [architecture.md](architecture.md).
+- **Preview without uploading.** Your files stay in your browser until you press Share. No account needed.
+- **Keep every version.** Each upload becomes the next version, with a note on what changed.
+- **Share a link.** Sign in with Google and share a version. You get a live link that always shows the
+  version you choose, and pinned links (`/s/my-site@3/`) that always show one version.
+- **Roll back in one click.** Point the live link at any earlier version. Visitors see it on their next load.
+- **Pick a link name.** `spinsite.app/s/my-site/` instead of a random id. Old names keep working after a rename.
+- **Sites that remember things.** Shared sites can use `localStorage`, so a course remembers your progress
+  or a game your high score, saved in each visitor's own browser.
 
-## Local development
+## Examples
 
-```bash
-python3 -m venv venv && source venv/bin/activate
-pip3 install -r requirements-dev.txt
-npm install
-cp .env.example .env.auth.local      # optional: fill in Google keys to turn on sign-in
-npm run dev:api                      # FastAPI on :8000 (SQLite + files in ./.data)
-npm run dev                          # Next.js on :3000, proxies /api and /s to :8000
-```
+- [Learn SQL](https://spinsite.app/s/learn-sql/): a beginner SQL course with a real database in the tab.
+- [Ring Studio](https://spinsite.app/s/ring-studio/): try on engagement rings on an animated hand.
 
-Checks (CI runs the same on every push):
+## Is it safe to open a shared site?
 
-```bash
-black --check api tests && pytest -q
-npx eslint app lib && npx tsc --noEmit && npm run build
-```
+Shared sites run in a locked-down sandbox: their scripts can't read your Site Runner account, cookies or edit
+tokens. What a site saves stays in your browser, kept apart from every other shared site. See
+[SECURITY.md](SECURITY.md) to report a problem.
 
-## Configuration
+## Limits
 
-All settings are environment variables; see [.env.example](.env.example).
+Each shared version can be up to 4 MB zipped (50 MB unzipped, 2,000 files). Each account can have 50 shared
+sites and 250 MB of storage; a file used by many versions counts once. You can delete old shared versions to
+make room. Local previews are limited only by your browser's storage.
 
-| Variable | Purpose |
-| --- | --- |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google sign-in. Unset: sign-in off (anonymous shares locally, no shares in production) |
-| `SESSION_SECRET` | Signs the session cookie |
-| `ADMIN_EMAILS` | Emails allowed to unpublish any site |
-| `DATABASE_URL` | Postgres (set by the Neon integration). Unset locally: SQLite in `./.data` |
-| `BLOB_READ_WRITE_TOKEN` | Vercel Blob; set automatically when a store is connected |
-| `BLOB_ACCESS` | `private` (default) or `public`, matching the store |
-| `CRON_SECRET` | Guards the daily cleanup job (`vercel.json` cron) |
+## For developers
 
-Google OAuth client: a Web application with redirect URIs `http://localhost:3000/api/auth/callback`
-and `https://<your domain>/api/auth/callback`.
+Site Runner is open source: Next.js and a FastAPI backend on Vercel, Postgres for metadata and Vercel Blob for
+files.
 
-## Deploying
+- [Running it locally](docs/development.md)
+- [Configuration](docs/configuration.md)
+- [API](docs/api.md)
+- [Deploying](docs/deploying.md)
+- [Architecture](architecture.md)
 
-The Vercel project is connected to this repo: every push to `main` deploys to production, and other
-branches and pull requests get preview deployments. `vercel deploy --prod` still works by hand.
-`vercel.json` routes `/api/*` and `/s/*` to `api/index.py`; Python dependencies come from `pyproject.toml`.
-
-## API
-
-| Method | Path | Auth |
-| --- | --- | --- |
-| `POST` | `/api/sites` (zip, name, note, optional slug) | signed in |
-| `POST` | `/api/sites/<id>/versions` | owner or `Authorization: Bearer <edit token>` |
-| `POST` | `/api/sites/<id>/live` `{"version": n}` | owner or token |
-| `POST` | `/api/sites/<id>/token` (replace token) | owner or token |
-| `POST` | `/api/sites/<id>/slug` `{"slug": "learn-sql"}` | owner or token |
-| `GET` | `/api/slugs/<name>` (is it free?) | — |
-| `DELETE` | `/api/sites/<id>/versions/<n>` (not the live one) | owner or token |
-| `DELETE` | `/api/sites/<id>` (unpublish) | owner, token or admin |
-| `POST` | `/api/sites/<id>/claim` | signed in + token |
-| `GET` | `/api/sites/<id>`, `/api/me/sites`, `/api/me/usage`, `/api/auth/me` | — / signed in / signed in / — |
-
-Limits: 4 MB zipped and 50 MB unzipped per version, 2,000 files, 50 sites per account, 200 versions per
-site, 100 uploads per account per day, 250 MB of storage per account (`STORAGE_QUOTA_MB`; a file used by many
-versions counts once). Hidden files (`.git`, `.env`, ...) are dropped on upload.
-
-## Known limitations
-
-- Local previews run on the app's origin, so a malicious zip you preview yourself could read tokens stored in
-  your browser. Shared links are sandboxed. Fix: serve previews from a separate origin.
-- Unpublished sites' files are deleted by the daily cleanup job once no other site uses them.
-
-## Security
-
-To report a vulnerability, see [SECURITY.md](SECURITY.md).
+Found a bug or have an idea? [Open an issue](https://github.com/varunhv97/site-runner/issues).
 
 ## License
 
 MIT, see [LICENSE](LICENSE). The design kit in `public/assets` has its own licence (`public/assets/LICENSE`).
+
+Made by [Varun](https://www.linkedin.com/in/varunhv/).
