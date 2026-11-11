@@ -25,8 +25,11 @@ ready you can share the one you pick.
 ## Is it safe to open a shared site?
 
 Shared sites run in a locked-down sandbox: their scripts can't read your Site Runner account, cookies or edit
-tokens. What a site saves stays in your browser, kept apart from every other shared site. See
-[SECURITY.md](SECURITY.md) to report a problem.
+tokens. What a site saves stays in your browser, kept apart from every other shared site.
+
+Shared sites are made by Site Runner's users. If one is phishing, malware, a scam or otherwise abusive,
+[report it](https://spinsite.app/report) and we'll take it down. To report a security problem in Site Runner
+itself, see [SECURITY.md](SECURITY.md).
 
 ## Limits
 

@@ -30,6 +30,25 @@ the app's own origin. Scripts send no `Origin` header and authenticate with a si
 | `GET` | `/api/me/sites` | signed in |
 | `GET` | `/api/me/usage` → `{"used_bytes", "quota_bytes"}` | signed in |
 
+## Abuse
+
+| Method | Path | Auth |
+| --- | --- | --- |
+| `POST` | `/api/reports` `{"url", "reason", "details"?, "contact"?}` | none (10 an hour per IP) |
+| `GET` | `/api/admin/reports?status=open` (`open`, `actioned`, `dismissed`, `all`) | admin |
+| `POST` | `/api/admin/reports/<id>` `{"status": "actioned" or "dismissed"}` | admin |
+| `GET` | `/api/admin/bans` | admin |
+| `POST` | `/api/admin/bans` `{"email", "reason"}` → `{"ban", "sites_unpublished"}` | admin |
+| `DELETE` | `/api/admin/bans/<email>` | admin |
+
+- `url`: a share link of this app (`/s/<name or id>/...`) or, when `USERCONTENT_BASE_DOMAIN` is set,
+  `https://<id or name>.<that domain>/...`. `reason`: `phishing`, `malware`, `scam`, `spam`, `illegal` or `other`.
+  `details` up to 2,000 characters; `contact` an optional email.
+- Admins are the `ADMIN_EMAILS`. An admin's `DELETE /api/sites/<id>` marks the site's open reports actioned.
+- A banned account gets 403 on every share write (create, publish, live, start page, link name, token, claim),
+  and so does an edit token for a banned owner's site. Banning unpublishes the account's sites; unbanning
+  doesn't bring them back.
+
 ## Start page
 
 `entry` is the page a version opens on: one of its `.html` files. Without it, the server picks `index.html`, else
@@ -52,4 +71,4 @@ and sends its choice with every share.
 - **Hidden files:** `.git`, `.env` and other dotfiles are dropped on upload.
 
 Errors come back as `{"error": "..."}` with a matching status: 401/403 for auth, 404, 409 (e.g. deleting the
-live version), 413 (too big or over quota) and 429 (a limit reached).
+live version), 413 (too big or over quota) and 429 (a limit reached, e.g. too many reports).

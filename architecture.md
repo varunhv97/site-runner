@@ -2,7 +2,7 @@
 
 ```
 Browser ─┬─ public/index.html  landing page at / (static, taste-skill kit in public/assets)
-         ├─ app/app/page.tsx (the tool, at /app)
+         ├─ app/app/page.tsx (the tool, at /app) · app/report (report abuse) · app/admin (review)
          │    ├─ lib/ingest.ts      files/folders/zip → {path: bytes}   (fflate)
          │    ├─ lib/localStore.ts  IndexedDB: sites + content-addressed files (idb)
          │    └─ lib/share.ts       zip a version → POST /api/...
@@ -13,6 +13,7 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
               ├─ /s/<id>[@n]/<path>    HTML: wrapper page (frames /r/, keeps localStorage); other files as-is
               ├─ /r/<id>[@n]/<path>    shared files (sandbox CSP, CORS *); HTML gets the storage script
               ├─ _core/frames.py       wrapper page + in-frame storage script
+              ├─ _core/abuse.py        reports, bans, report rate limit
               ├─ _core/sites.py        zip validation, versions, access, limits, cleanup
               ├─ _core/db.py           SQLAlchemy tables; Postgres via DATABASE_URL, else SQLite (.data/)
               └─ _core/storage.py      LocalStorage (.data/) | BlobStorage (Vercel Blob REST)
@@ -46,7 +47,8 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
 ## Data (server)
 - **Database** (`_core/db.py`): `sites` (owner, token hash, live version, deleted_at), `versions`,
   `version_files` (site, version, path → sha256), `slugs` (link names, never deleted; newest = current),
-  `users`, `uploads` (per user per day), `blobs` (digest → size), `deleted_versions` (site, n: never reused). `/s/<ref>` resolves a random id first, then a link name; old names 308 to the current one.
+  `users`, `uploads` (per user per day), `blobs` (digest → size), `deleted_versions` (site, n: never reused),
+  `reports`, `bans`, `rate_limits` (abuse, below). `/s/<ref>` resolves a random id first, then a link name; old names 308 to the current one.
   Publishing is one transaction with the site row locked (`FOR UPDATE`); serving a file is one indexed lookup.
   Schema is created on first use (`create_all`); add migrations (Alembic) before changing columns.
 - **Blob** (`_core/storage.py`): only `blobs/<sha256>` file contents. Private store (`BLOB_ACCESS`); the token is
@@ -60,6 +62,15 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
   max(current, deleted) + 1.
 - Cleanup: Vercel Cron calls `/api/cron/cleanup` daily (CRON_SECRET) and deletes blobs no published version uses
   (older than 1 hour), and drops their `blobs` rows.
+
+## Abuse (`_core/abuse.py`, `/report`, `/admin`)
+- `/report` (app origin) posts `POST /api/reports`: the link is parsed to a ref (`/s/<ref>` on PUBLIC_BASE_URL, or
+  `<ref>.<USERCONTENT_BASE_DOMAIN>`), resolved like `/s/`, stored in `reports` (status open/actioned/dismissed).
+- Rate limit: fixed one-hour window per client IP (X-Real-IP / X-Forwarded-For, set by Vercel) in `rate_limits`;
+  pruned by the cleanup cron.
+- `/admin` (ADMIN_EMAILS) lists reports; Unpublish = the existing admin takedown, which also actions the site's reports.
+- `bans` (email, sub known at ban time): `index._can_share` runs before every share write and refuses a banned
+  user, or a write to a banned owner's site. A ban unpublishes the owner's sites (`deleted_by_admin`).
 
 ## Local data (IndexedDB `site-runner` v1)
 - `sites` (keyPath id): LocalSite incl. `versions[].manifest` and optional `remote {siteId, token, url, live, pushed}`

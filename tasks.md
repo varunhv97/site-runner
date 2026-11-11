@@ -38,6 +38,10 @@
 - [x] "Shared from your account" in /app (2026-11-11): lists the account's shared sites missing from this browser;
   Open here downloads the live version and links it, so publishing updates the same link
 
+- [x] Abuse handling (2026-11-11): `/report` page + `POST /api/reports` (rate-limited per IP), admin review at
+  `/admin`, account bans (block all share writes, unpublish sites); "Report abuse" link in /app; `tests/test_abuse.py`.
+  Landing page footer link still to add (public/index.html, taste-skill)
+
 ## Next
 - [ ] **HIGH PRIORITY:** serve local previews from a separate origin. Today a malicious zip previewed locally
   runs same-origin as the app and can read the edit tokens in IndexedDB
@@ -46,7 +50,6 @@
 - [ ] Optional: a Neon `dev` branch for testing against real Postgres
 - [ ] Add Alembic migrations before the first schema change
 - [ ] Pre-share warning + secret scan (API keys in JS); optional expiry for old shares
-- [ ] Report-abuse link and contact address
 - [ ] MCP server (Python FastMCP): create_site, upload_version, list_versions, set_live, diff_versions
 - [ ] Serve shared content from a separate domain (stronger isolation; would replace the localStorage bridge)
 - [ ] Bridge gaps: IndexedDB and cookies aren't saved; popups opened by a shared site get no saved storage
