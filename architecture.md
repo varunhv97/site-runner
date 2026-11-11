@@ -29,7 +29,8 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
 - Dev: `next.config.ts` rewrites `/api/*`, `/s/*` and `/r/*` → `127.0.0.1:8000`. There's an explicit trailing-slash rule
   because `:path*` drops it. `skipTrailingSlashRedirect` stops Next stripping `/s/<id>/`.
 - Python deps: Vercel reads `pyproject.toml` `[project].dependencies` (not requirements.txt) when it exists. Keep both in sync.
-- Prod: `vercel.json` rewrites `/api/*`, `/s/*` and `/r/*` → `api/index.py`. `api/_core` is underscore-prefixed so
+- Prod: `www.spinsite.app` 308s to `spinsite.app` (one origin for cookies, IndexedDB and sign-in).
+  `vercel.json` rewrites `/api/*`, `/s/*` and `/r/*` → `api/index.py`. `api/_core` is underscore-prefixed so
   Vercel doesn't treat it as functions.
 
 ## Sign-in (Google)

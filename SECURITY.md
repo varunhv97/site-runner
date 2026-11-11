@@ -10,5 +10,5 @@ Please give us a reasonable time to fix it before you share details publicly.
 
 ## Scope
 
-The app at spinsite.vercel.app and this repository. Shared sites are user content: report abuse of a
+The app at spinsite.app and this repository. Shared sites are user content: report abuse of a
 shared site the same way, with its link.

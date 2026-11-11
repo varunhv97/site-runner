@@ -1,7 +1,7 @@
 # Site Runner
 
 Run HTML prototypes in your browser, keep every upload as a version, and share the one you pick as a link.
-Live at [spinsite.vercel.app](https://spinsite.vercel.app).
+Live at [spinsite.app](https://spinsite.app).
 
 - **Local first.** Drop in HTML files, a folder or a zip. A Service Worker serves them from IndexedDB, so
   relative links, CSS and scripts work, and nothing is uploaded until you press Share.
