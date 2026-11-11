@@ -35,11 +35,12 @@ Do these in order. Until step 5 the live app keeps working as before.
    certificate. The rest of the zone stays at Cloudflare.
 2. **Create the content project** in Vercel: Add New → Project → the same GitHub repo. Settings:
    - Framework Preset: **Other**
-   - Build Command (override on): `mkdir -p uc-static`
+   - Build Command (override on): `mkdir -p uc-static/__sr && echo ok > uc-static/__sr/build.txt` (Vercel refuses an
+     empty output folder; the placeholder sits under `/__sr/`, which is reserved, so it never hides a site's file)
    - Output Directory (override on): `uc-static`
    - Install Command (override on): `echo skip` (the Python function installs its own dependencies)
    - Root Directory: the repo root (default)
-   - Until the code is on `main`: Settings → Git → Production Branch = `usercontent-origin`
+   - Until the code is on `main`: Settings → Git → Production Branch = `integration`
 3. **Content project env vars** (Production and Preview): `PUBLIC_BASE_URL=https://spinsite.app`,
    `USERCONTENT_BASE_DOMAIN=sites.spinsite.app`, `CONTENT_ONLY=1`, and read access to storage: connect the same
    Neon database (`DATABASE_URL`) and the same private Blob store (`BLOB_READ_WRITE_TOKEN`, `BLOB_ACCESS=private`).
