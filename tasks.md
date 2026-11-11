@@ -52,6 +52,9 @@
   `tests/path_rules.json` (+ node test); headless-Chrome checks (preview frame + new tab, malicious preview gets
   no tokens/API, sites isolated, storage persists, /s/ redirect)
 
+- [x] Sites live on their link name (2026-11-11): `<name>.sites.spinsite.app` (id without a name); the id and earlier
+  names 308 to it; rename warns that visitors' saved data resets; `p-` names reserved
+
 ## Next
 - [ ] Deploy the content origin: DNS + second Vercel project (docs/deploying.md), then check a live share link
 - [ ] Submit sites.spinsite.app to the Public Suffix List (until then sites are same-site with each other and the app)

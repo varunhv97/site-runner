@@ -427,7 +427,8 @@ export default function Home() {
                       const remote = site.remote!;
                       const slug = await ask({
                         title: "Change link name",
-                        message: "The current link keeps working and forwards to the new one.",
+                        message:
+                          "The current link keeps working and forwards to the new one. The site moves to the new name's address, so anything visitors saved on it (progress, settings) starts fresh.",
                         input: {
                           label: "Link name",
                           prefix: `${location.host}/s/`,

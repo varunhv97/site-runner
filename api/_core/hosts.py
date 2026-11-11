@@ -13,7 +13,8 @@ from urllib.parse import urlsplit
 DEV_APP_ORIGIN = "http://localhost:3000"
 DEV_CONTENT_DOMAIN = "usercontent.localhost:8001"
 
-SITE_LABEL = re.compile(r"^[a-z0-9]{10}$")
+# a shared site's host: its current link name, or its random id when it has none (both are DNS-safe labels)
+SITE_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$")
 PREVIEW_LABEL = re.compile(r"^p-([0-9a-f]{12})$")
 
 
@@ -78,9 +79,17 @@ def content_label(host: str | None) -> str | None:
     return None
 
 
-def site_origin(site_id: str) -> str:
+def site_label(site_id: str, slug: str | None) -> str:
+    """A site's one canonical host label: its current link name, else its id. A name that looks like a preview
+    host (p-…) or a punycode label (--) can't be a host, so such a site keeps its id."""
+    if slug and not slug.startswith("p-") and "--" not in slug and SITE_LABEL.match(slug):
+        return slug
+    return site_id
+
+
+def site_origin(label: str) -> str:
     domain = content_domain()
-    return f"{content_scheme(domain)}://{site_id}.{domain}"
+    return f"{content_scheme(domain)}://{label}.{domain}"
 
 
 def preview_origin(local_id: str) -> str:

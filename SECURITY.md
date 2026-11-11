@@ -21,7 +21,7 @@ Reports are reviewed by the admins, who can take sites down and ban accounts.
 
 ## How user content is isolated
 
-- spinsite.app never serves user HTML. Each shared site runs on `<site id>.sites.spinsite.app` and each local
+- spinsite.app never serves user HTML. Each shared site runs on its own `<name>.sites.spinsite.app` (or `<site id>.…`) and each local
   preview on `p-<local id>.sites.spinsite.app`, so the browser's same-origin policy keeps them away from the app's
   IndexedDB (edit tokens), localStorage and API responses.
 - Content responses carry a sandbox CSP, `Origin-Agent-Cluster: ?1` and `nosniff`. The server never sets or reads

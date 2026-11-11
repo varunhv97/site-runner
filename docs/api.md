@@ -80,7 +80,10 @@ and sends its choice with every share.
 - Share links are `https://spinsite.app/s/<name or id>/` (live) and `/s/<name>@<n>/` (pinned version n). API
   responses always return these; they don't depend on where content is hosted.
 - Every `/s/…` (and old `/r/…`) URL redirects (308, query kept) to the site's own origin:
-  `https://<site id>.sites.spinsite.app/` for the live version and `/@<n>/` for a pinned one, plus the same path.
+  `https://<link name>.sites.spinsite.app/` (or `<site id>.…` for a site without a name) for the live version and
+  `/@<n>/` for a pinned one, plus the same path. Each site has one host: its id and earlier names 308 there, so
+  visitors' saved data is never split. Renaming moves the site to the new name's host (saved data starts fresh).
+  Link names starting with `p-` are reserved for previews.
 - Content there is served with a sandbox CSP that keeps the site's own origin (its own `localStorage`,
   IndexedDB and cookies), `Origin-Agent-Cluster: ?1`, and `Access-Control-Allow-Origin: *` on non-HTML files.
   Service workers are refused (403). The app's API and cookies don't exist on these hosts.

@@ -75,25 +75,26 @@ def test_share_links_redirect_to_the_site_host(client):
     body = site(client, {"index.html": "home", "docs/a.html": "a", "app.js": "x=1"}, slug="trail-map")
     sid = body["site"]["id"]
     assert body["url"].endswith("/s/trail-map/")  # share links stay on the app's domain
+    host = f"https://trail-map.{DOMAIN}"  # a named site lives on its name
     cases = {
-        "/s/trail-map/": f"https://{sid}.{DOMAIN}/",
-        "/s/trail-map": f"https://{sid}.{DOMAIN}/",
-        f"/s/{sid}/docs/a.html?x=1&y=2": f"https://{sid}.{DOMAIN}/docs/a.html?x=1&y=2",
-        "/s/trail-map@1/docs/a.html": f"https://{sid}.{DOMAIN}/@1/docs/a.html",
-        "/s/trail-map@1": f"https://{sid}.{DOMAIN}/@1/",
-        "/s/trail-map/app.js": f"https://{sid}.{DOMAIN}/app.js",  # not just HTML: everything moved
-        "/r/trail-map@1/docs/a.html": f"https://{sid}.{DOMAIN}/@1/docs/a.html",  # the old frame links
-        "/s/trail-map/a%20b.html": f"https://{sid}.{DOMAIN}/a%20b.html",
+        "/s/trail-map/": f"{host}/",
+        "/s/trail-map": f"{host}/",
+        f"/s/{sid}/docs/a.html?x=1&y=2": f"{host}/docs/a.html?x=1&y=2",  # by id too: still its one host
+        "/s/trail-map@1/docs/a.html": f"{host}/@1/docs/a.html",
+        "/s/trail-map@1": f"{host}/@1/",
+        "/s/trail-map/app.js": f"{host}/app.js",  # not just HTML: everything moved
+        "/r/trail-map@1/docs/a.html": f"{host}/@1/docs/a.html",  # the old frame links
+        "/s/trail-map/a%20b.html": f"{host}/a%20b.html",
     }
     for url, location in cases.items():
         r = client.get(url, follow_redirects=False)
         assert r.status_code == 308 and r.headers["location"] == location, url
         assert "set-cookie" not in r.headers
-    # an old link name forwards straight to the site's host
+    # after a rename, the old link name forwards straight to the new name's host
     auth = {"Authorization": f"Bearer {body['edit_token']}"}
     assert client.post(f"/api/sites/{sid}/slug", json={"slug": "ridge-loop"}, headers=auth).status_code == 200
     r = client.get("/s/trail-map@1/?q=1", follow_redirects=False)
-    assert r.headers["location"] == f"https://{sid}.{DOMAIN}/@1/?q=1"
+    assert r.headers["location"] == f"https://ridge-loop.{DOMAIN}/@1/?q=1"
 
 
 def test_unknown_sites_and_versions_404_on_the_app_host(client):
@@ -199,11 +200,32 @@ def test_unknown_and_deleted_sites_404(client):
     assert client.get("/", headers=on(sid)).status_code == 404
 
 
-def test_site_hosts_use_ids_not_link_names(client):
-    # a 10-character link name must not open the site on a second origin (with its own storage)
-    sid = site(client, slug="helloworld")["site"]["id"]
-    assert client.get("/", headers=on(sid)).status_code == 200
-    assert client.get("/", headers=on("helloworld")).status_code == 404
+def test_each_site_has_one_host_its_name_else_its_id(client):
+    # one host per site, so visitors' saved data is never split between two origins
+    body = site(client, {"index.html": "home", "a b.html": "x"}, slug="helloworld")  # a name shaped like an id
+    sid = body["site"]["id"]
+    assert client.get("/", headers=on("helloworld")).text == "home"
+    r = client.get("/a%20b.html?x=1", headers=on(sid), follow_redirects=False)  # the id goes to the name
+    assert r.status_code == 308 and r.headers["location"] == f"https://helloworld.{DOMAIN}/a%20b.html?x=1"
+    r = client.get("/@1/", headers=on(sid), follow_redirects=False)
+    assert r.headers["location"] == f"https://helloworld.{DOMAIN}/@1/"
+
+    auth = {"Authorization": f"Bearer {body['edit_token']}"}
+    assert client.post(f"/api/sites/{sid}/slug", json={"slug": "hello-again"}, headers=auth).status_code == 200
+    r = client.get("/", headers=on("helloworld"), follow_redirects=False)  # an earlier name forwards
+    assert r.status_code == 308 and r.headers["location"] == f"https://hello-again.{DOMAIN}/"
+    assert client.get("/", headers=on("hello-again")).text == "home"
+
+    unnamed = site(client)["site"]["id"]  # no name: its id is its host
+    assert client.get("/", headers=on(unnamed)).text == "v1"
+    assert client.get("/", headers=on("no-such-site")).status_code == 404
+
+
+def test_names_that_look_like_preview_hosts_are_refused(client):
+    r = client.post("/api/sites", files={"file": ("s.zip", make_zip({"index.html": "x"}))}, data={"slug": "p-thing"})
+    assert r.status_code == 400 and "p-" in r.json()["error"]
+    assert hosts.site_label("abc1234567", "p-legacy") == "abc1234567"  # an older p- name keeps the id host
+    assert hosts.site_label("abc1234567", "ok-name") == "ok-name"
 
 
 def test_hosts_match_case_insensitively_and_with_a_port(client, monkeypatch):

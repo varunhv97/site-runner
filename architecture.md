@@ -9,7 +9,8 @@ spinsite.app (app origin: cookies, IndexedDB with edit tokens; never runs user H
   │    ├─ lib/preview.ts     hands a version's files to p-<id>.<UC> by postMessage
   │    └─ lib/share.ts       zip a version → POST /api/...
   └─ api/index.py (FastAPI) /api/*, and /s/ + /r/ → 308 to the site's host
-<site id>.<UC>           one shared site: / live, /@<n>/ pinned   (api/_core/content.py)
+<name|id>.<UC>           one shared site: / live, /@<n>/ pinned   (api/_core/content.py); its one host is its current
+                         link name, else its id (hosts.site_label); the id and earlier names 308 there
 p-<local id>.<UC>        one local preview: /__sr/boot + /__sr/sw.js from the server, the rest from the worker
 api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path rules) · preview/*.js (boot, worker)
            sites.py (zips, versions, limits) · db.py (Postgres | SQLite) · storage.py (Blob | .data/)

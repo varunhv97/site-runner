@@ -17,7 +17,7 @@ from sqlalchemy import delete, func, select, union_all, update
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import IntegrityError
 
-from . import holds, scan
+from . import holds, hosts, scan
 from .db import (
     blobs,
     create_schema,
@@ -200,6 +200,8 @@ def slug_problem(slug: str) -> str | None:
         return "Use single hyphens only."
     if slug in RESERVED_SLUGS:
         return "That name is reserved."
+    if slug.startswith("p-"):
+        return "Names starting with p- are reserved."
     return None
 
 
@@ -375,10 +377,17 @@ class Sites:
             n = site.live if n is None else n
             q = select(versions).where(versions.c.site_id == site_id, versions.c.n == n)
             row = (await conn.execute(q)).first()
-            current = await self._current_slug(conn, site_id) if via_slug else None
+            newest = await self._current_slug(conn, site_id)
         if row is None:
             raise SiteError("version not found", 404)
-        return {"site_id": site_id, "n": row.n, "entry": row.entry, "via_slug": via_slug, "current_slug": current}
+        return {
+            "site_id": site_id,
+            "n": row.n,
+            "entry": row.entry,
+            "via_slug": via_slug,
+            "current_slug": newest if via_slug else None,
+            "label": hosts.site_label(site_id, newest),  # the one content host this site is served on
+        }
 
     async def file_digest(self, site_id: str, n: int, path: str) -> str | None:
         async with self.engine.connect() as conn:

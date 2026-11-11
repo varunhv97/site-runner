@@ -106,10 +106,10 @@ def make_content_app(get_sites: Callable) -> FastAPI:
     @content.api_route("/{path:path}", methods=["GET", "HEAD"])
     async def serve(path: str, request: Request):
         label = hosts.content_label(request.headers.get("host")) or ""
-        if hosts.SITE_LABEL.match(label):
-            return await serve_site(get_sites(), request, label, path)
-        if hosts.PREVIEW_LABEL.match(label):
+        if hosts.PREVIEW_LABEL.match(label):  # first: p-<id> is never a site
             return serve_preview(request, path)
+        if hosts.SITE_LABEL.match(label) and "--" not in label:
+            return await serve_site(get_sites(), request, label, path)
         return not_found("There's no site here.")
 
     return content
@@ -150,8 +150,10 @@ def serve_preview(request: Request, path: str) -> Response:
     return not_found("This preview isn't loaded. Open it again from Site Runner.")
 
 
-async def serve_site(sites, request: Request, site_id: str, path: str) -> Response:
-    """/ follows the live version, /@<n>/ pins version n. Same origin for both, so they share storage."""
+async def serve_site(sites, request: Request, label: str, path: str) -> Response:
+    """/ follows the live version, /@<n>/ pins version n. Same origin for both, so they share storage.
+    label: the site's link name or id. Each site is served on one host only (its current name, else its id), so
+    visitors' saved data is never split; its other hosts (the id, earlier names) redirect there."""
     if request.headers.get("service-worker") == "script":
         # a site's own service worker could keep serving it after a takedown
         return Response("Service workers aren't allowed on shared sites.", 403, media_type="text/plain")
@@ -162,9 +164,13 @@ async def serve_site(sites, request: Request, site_id: str, path: str) -> Respon
     base = f"/{pinned.group(0)}" if pinned else "/"
     rest = path[pinned.end() :] if pinned else path
     try:
-        version = await sites.resolve(site_id, int(pinned.group(1)) if pinned else None, slugs=False)
+        version = await sites.resolve(label, int(pinned.group(1)) if pinned else None)
     except SiteError as e:
         return held() if e.status == 451 else not_found()
+    if version["label"] != label:  # the id or an earlier name: go to the site's one host, same path and query
+        return RedirectResponse(
+            f"{hosts.site_origin(version['label'])}/{quote(path, safe='/@')}{_query(request)}", status_code=308
+        )
 
     digests: dict[str, str] = {}
 

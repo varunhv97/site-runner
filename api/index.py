@@ -604,7 +604,7 @@ async def to_content_root(request: Request, ref: str):
 @app.api_route("/s/{ref}/{path:path}", methods=["GET", "HEAD"])
 @app.api_route("/r/{ref}/{path:path}", methods=["GET", "HEAD"])
 async def to_content_host(request: Request, ref: str, path: str):
-    """/s/<name or id>[@n]/<path> -> https://<id>.<content domain>/[@n/]<path>, keeping the query.
+    """/s/<name or id>[@n]/<path> -> https://<name, else id>.<content domain>/[@n/]<path>, keeping the query.
     /s/ links stay the canonical share links; this app's origin never serves a shared site's files.
     (/r/ was the sandboxed frame of the old localStorage bridge; its links redirect the same way.)"""
     m = _REF.match(ref)
@@ -613,7 +613,7 @@ async def to_content_host(request: Request, ref: str, path: str):
     pinned = m.group(2)
     try:
         version = await sites.resolve(m.group(1), int(pinned) if pinned else None)
-        origin = hosts.site_origin(version["site_id"])
+        origin = hosts.site_origin(version["label"])
     except SiteError as e:
         return held() if e.status == 451 else not_found()
     except hosts.ConfigError as e:

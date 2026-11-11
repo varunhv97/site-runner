@@ -5,7 +5,7 @@ Site Runner runs on Vercel as **two projects from this repo**:
 | Project | Domains | Serves |
 | --- | --- | --- |
 | app (`site-runner`) | `spinsite.app` | landing page, `/app`, `/api/*`, sign-in; `/s/` and `/r/` redirect to the content host |
-| content (e.g. `site-runner-content`) | `*.sites.spinsite.app` | shared sites (`<id>.sites…`) and previews (`p-<id>.sites…`) only |
+| content (e.g. `site-runner-content`) | `*.sites.spinsite.app` | shared sites (`<name>.sites…`, or `<id>.sites…` without a name) and previews (`p-<id>.sites…`) only |
 
 The content project holds no app secrets, so even a bug there can't touch sessions or sign-in.
 
@@ -47,10 +47,10 @@ Do these in order. Until step 5 the live app keeps working as before.
    **Do not** set `SESSION_SECRET`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `CRON_SECRET` or `ADMIN_EMAILS`.
    Optional: Settings → Cron Jobs → disable (its cron call only gets a 404).
 4. **Domain:** content project → Settings → Domains → add `*.sites.spinsite.app`. Wait for the certificate, deploy,
-   then check `curl -I https://<a site id>.sites.spinsite.app/` (200, `content-security-policy: sandbox …`) and
+   then check `curl -I https://<a site's name or id>.sites.spinsite.app/` (200, `content-security-policy: sandbox …`) and
    `curl -I https://p-0123456789ab.sites.spinsite.app/__sr/boot` (200). Never add this domain to the app project.
 5. **App project:** add `USERCONTENT_BASE_DOMAIN=sites.spinsite.app` (Production and Preview), then merge to `main`.
-   Check `curl -I https://spinsite.app/s/learn-sql/` → 308 to `https://<id>.sites.spinsite.app/`.
+   Check `curl -I https://spinsite.app/s/learn-sql/` → 308 to `https://learn-sql.sites.spinsite.app/`.
 6. Content project: set the Production Branch back to `main`.
 
 Everyone signs in again once: the session cookie is renamed to `__Host-sr_session`.

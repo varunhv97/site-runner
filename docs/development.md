@@ -6,7 +6,7 @@
 - **`/`**: a static landing page (`public/index.html`), built with the taste-skill kit in `public/assets`.
 - **`/api/*`, `/s/*`, `/r/*`**: FastAPI, run as a Vercel Python function (`api/`). `/s/` and `/r/` redirect to
   the content origin.
-- **User content**: the same FastAPI app on another host. Shared sites at `http://<site id>.usercontent.localhost:8001/`,
+- **User content**: the same FastAPI app on another host. Shared sites at `http://<name or site id>.usercontent.localhost:8001/`,
   local previews at `http://p-<local id>.usercontent.localhost:8001/`. `*.localhost` resolves to 127.0.0.1 in
   Chrome, Firefox and curl, and counts as a secure context, so service workers work over http.
 - **Storage:** Postgres (Neon) for metadata and a private Vercel Blob store for files. Locally both are replaced

@@ -184,7 +184,7 @@ def test_rename_keeps_old_links_and_never_frees_names(client, monkeypatch):
     assert r.status_code == 200 and r.json()["url"] == f"{BASE}/s/ridge-loop/"
     assert page(client, "/s/ridge-loop/") == "v2"
     old = client.get("/s/trail-map@1/index.html", follow_redirects=False)
-    assert old.status_code == 308 and old.headers["location"] == f"https://{sid}.sites.spinsite.app/@1/index.html"
+    assert old.status_code == 308 and old.headers["location"] == "https://ridge-loop.sites.spinsite.app/@1/index.html"
     assert page(client, "/s/trail-map@1/") == "v1"  # following the redirect, pinned version kept
 
     client.delete(f"/api/sites/{sid}")

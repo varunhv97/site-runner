@@ -11,7 +11,8 @@ Keep **versions** of each site. Optionally **share** a version via a public link
 - Version history per site; preview any version.
 - Share: first share creates a remote site + secret **edit token**; later versions "Publish" to it.
 - Live link `/s/<id>/` follows the live version; `/s/<id>@<n>/` pins a version. "Make live" = rollback/promote.
-  Both redirect to the site's own host: `<id>.sites.spinsite.app/` and `/@<n>/`.
+  Both redirect to the site's own host: `<link name>.sites.spinsite.app/` (its id without a name) and `/@<n>/`.
+  One host per site; renaming moves it (visitors' saved data starts fresh).
 - (Planned) MCP server so agents can publish/rollback with the edit token.
 
 ## Key decisions
