@@ -143,6 +143,30 @@ export async function unpublish(original: LocalSite): Promise<LocalSite> {
   return site;
 }
 
+/** Delete one shared version that isn't live: its pinned link (@n) stops working and the number is never
+ * reused. The local version stays in this browser and can be published again (as a new number). */
+export async function deleteRemoteVersion(original: LocalSite, remoteN: number): Promise<LocalSite> {
+  const site = structuredClone(original);
+  if (!site.remote) return site;
+  try {
+    const r = await call<{ site: RemoteSite }>(`/api/sites/${site.remote.siteId}/versions/${remoteN}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${site.remote.token}` },
+    });
+    site.remote.live = r.site.live;
+  } catch (e) {
+    if (!isGone(e)) throw e;
+    // "no such version": already deleted (elsewhere). Any other 404 means the whole shared site is gone.
+    if ((e as ApiError).message !== "no such version") {
+      throw new Error("This shared site no longer exists. Click Unpublish to clear it, then share again.");
+    }
+  }
+  for (const [localN, n] of Object.entries(site.remote.pushed)) {
+    if (n === remoteN) delete site.remote.pushed[Number(localN)];
+  }
+  return site;
+}
+
 /** Replace the edit token, for when it has leaked: the old one stops working. */
 export async function rotateToken(original: LocalSite): Promise<LocalSite> {
   const site = structuredClone(original);
@@ -173,6 +197,18 @@ export async function fetchMe(): Promise<Me> {
 
 export async function signOut(): Promise<void> {
   await call("/api/auth/logout", { method: "POST" });
+}
+
+/** Storage the signed-in account's shared sites use (unique files), and its quota. null when signed out. */
+export type Usage = { used_bytes: number; quota_bytes: number };
+
+export async function fetchUsage(): Promise<Usage | null> {
+  try {
+    const res = await fetch("/api/me/usage");
+    return res.ok ? ((await res.json()) as Usage) : null;
+  } catch {
+    return null;
+  }
 }
 
 export const signInUrl = "/api/auth/login?next=/app";

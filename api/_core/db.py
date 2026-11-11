@@ -7,6 +7,7 @@ import os
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
     ForeignKeyConstraint,
@@ -86,6 +87,27 @@ uploads = Table(
     Column("sub", String(255), primary_key=True),
     Column("day", String(10), primary_key=True),  # YYYY-MM-DD, UTC
     Column("count", Integer, nullable=False),
+)
+
+
+# Size of each stored file (blobs/<digest>), for the per-account storage quota. Its own table because
+# create_all can add tables but not columns. Files stored before it existed get a row lazily (Sites._sizes).
+blobs = Table(
+    "blobs",
+    metadata,
+    Column("digest", String(64), primary_key=True),
+    Column("size", BigInteger, nullable=False),
+)
+
+# Versions removed from a shared site. Their numbers are never handed out again, so a pinned link
+# (/s/<id>@n/) can't start showing different content.
+deleted_versions = Table(
+    "deleted_versions",
+    metadata,
+    Column("site_id", String(16), primary_key=True),
+    Column("n", Integer, primary_key=True),
+    Column("deleted_at", Integer, nullable=False),
+    ForeignKeyConstraint(["site_id"], ["sites.id"], ondelete="CASCADE"),
 )
 
 

@@ -5,7 +5,9 @@ import { fromDataTransfer, fromFileList, type FileMap } from "@/lib/ingest";
 import { addVersion, deleteSite, listSites, saveSite, type LocalSite } from "@/lib/localStore";
 import { useDialog } from "./AppDialog";
 import {
+  deleteRemoteVersion,
   fetchMe,
+  fetchUsage,
   pinnedUrl,
   checkSlug,
   normalizeSlug,
@@ -18,6 +20,7 @@ import {
   signOut,
   unpublish,
   type Me,
+  type Usage,
 } from "@/lib/share";
 
 async function registerPreviewWorker() {
@@ -34,6 +37,13 @@ function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** "38 MB", "4.2 MB", or KB/B below 1 MB: for the storage line. */
+function formatUsage(bytes: number) {
+  const mb = bytes / 1024 / 1024;
+  if (mb < 1) return formatSize(bytes);
+  return `${mb >= 10 ? Math.round(mb) : mb.toFixed(1)} MB`;
 }
 
 function DropZone({ label, onFiles }: { label: string; onFiles: (files: FileMap) => void }) {
@@ -103,6 +113,7 @@ export default function Home() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [me, setMe] = useState<Me>({ enabled: false, user: null });
+  const [usage, setUsage] = useState<Usage | null>(null);
   const { ask, dialog } = useDialog();
 
   const site = sites.find((s) => s.id === selectedId) ?? null;
@@ -119,6 +130,7 @@ export default function Home() {
     listSites().then(setSites);
     fetchMe().then((m) => {
       setMe(m);
+      if (m.user) fetchUsage().then(setUsage);
       if (new URLSearchParams(location.search).get("signin") === "failed") {
         setError("Google sign-in didn't finish. Try again, and pick an account with a verified email.");
       }
@@ -126,6 +138,7 @@ export default function Home() {
   }, []);
 
   const mustSignIn = me.enabled && !me.user;
+  const refreshUsage = async () => setUsage(await fetchUsage());
 
   async function run(label: string, fn: () => Promise<void>) {
     setBusy(label);
@@ -192,6 +205,7 @@ export default function Home() {
                     run("Signing out…", async () => {
                       await signOut();
                       setMe(await fetchMe());
+                      setUsage(null);
                     })
                   }
                 >
@@ -231,6 +245,16 @@ export default function Home() {
               </li>
             ))}
           </ul>
+          {usage && (
+            <div className="usage">
+              <span className="muted">
+                Shared sites use {formatUsage(usage.used_bytes)} of {formatUsage(usage.quota_bytes)}
+              </span>
+              <span className={`meter ${usage.used_bytes >= usage.quota_bytes * 0.9 ? "full" : ""}`} aria-hidden="true">
+                <span style={{ width: `${Math.min(100, (usage.used_bytes / usage.quota_bytes) * 100)}%` }} />
+              </span>
+            </div>
+          )}
         </aside>
 
         <section>
@@ -330,6 +354,7 @@ export default function Home() {
                       run("Unpublishing…", async () => {
                         await saveSite(await unpublish(site));
                         await refresh();
+                        if (me.user) await refreshUsage();
                       })
                     }
                   >
@@ -388,6 +413,7 @@ export default function Home() {
                                 await run("Uploading…", async () => {
                                   await saveSite(await shareVersion(site, v, slug));
                                   await refresh();
+                                  if (me.user) await refreshUsage();
                                 });
                               }}
                             >
@@ -396,18 +422,39 @@ export default function Home() {
                           ) : isLive ? (
                             <span className="badge">Live</span>
                           ) : (
-                            <button
-                              className="small"
-                              disabled={!!busy}
-                              onClick={() =>
-                                run("Updating…", async () => {
-                                  await saveSite(await setRemoteLive(site, remoteN));
-                                  await refresh();
-                                })
-                              }
-                            >
-                              Make live
-                            </button>
+                            <>
+                              <button
+                                className="small"
+                                disabled={!!busy}
+                                onClick={() =>
+                                  run("Updating…", async () => {
+                                    await saveSite(await setRemoteLive(site, remoteN));
+                                    await refresh();
+                                  })
+                                }
+                              >
+                                Make live
+                              </button>
+                              <button
+                                className="small danger"
+                                disabled={!!busy}
+                                onClick={async () =>
+                                  (await ask({
+                                    title: `Delete the shared copy of v${v.n}?`,
+                                    message: `Its pinned link (${pinnedUrl(site, remoteN)}) stops working for everyone. The live link isn't affected, and v${v.n} stays in this browser.`,
+                                    confirmLabel: "Delete shared copy",
+                                    danger: true,
+                                  })) !== null &&
+                                  run("Deleting shared copy…", async () => {
+                                    await saveSite(await deleteRemoteVersion(site, remoteN));
+                                    await refresh();
+                                    if (me.user) await refreshUsage();
+                                  })
+                                }
+                              >
+                                Delete shared copy
+                              </button>
+                            </>
                           )}
                           {remoteN !== undefined && (
                             <a className="small-link" href={pinnedUrl(site, remoteN)} target="_blank" rel="noreferrer">

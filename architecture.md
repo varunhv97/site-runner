@@ -38,19 +38,26 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
 - With GOOGLE_CLIENT_ID/SECRET set, sharing requires sign-in; the owner publishes without a token; edit tokens still work (API/MCP).
 - Browser writes must send this app's Origin (shared sites send `Origin: null` and are refused).
 - Unpublish sets `sites.deleted_at` (links 404); admins (ADMIN_EMAILS) can unpublish any site.
-- Limits per account: 50 sites, 200 versions a site, 100 uploads a day. Hidden files are dropped (client and server). Local dev reads keys from `.env.auth.local`.
+- Limits per account: 50 sites, 200 versions a site (current ones; deleting frees room), 100 uploads a day,
+  storage quota (below). Hidden files are dropped (client and server). Local dev reads keys from `.env.auth.local`.
 
 ## Data (server)
 - **Database** (`_core/db.py`): `sites` (owner, token hash, live version, deleted_at), `versions`,
   `version_files` (site, version, path → sha256), `slugs` (link names, never deleted; newest = current),
-  `users`, `uploads` (per user per day). `/s/<ref>` resolves a random id first, then a link name; old names 308 to the current one.
+  `users`, `uploads` (per user per day), `blobs` (digest → size), `deleted_versions` (site, n: never reused). `/s/<ref>` resolves a random id first, then a link name; old names 308 to the current one.
   Publishing is one transaction with the site row locked (`FOR UPDATE`); serving a file is one indexed lookup.
   Schema is created on first use (`create_all`); add migrations (Alembic) before changing columns.
 - **Blob** (`_core/storage.py`): only `blobs/<sha256>` file contents. Private store (`BLOB_ACCESS`); the token is
   needed for every read. Files never change, so reads use the CDN cache.
 - Neon: use the pooled connection string; asyncpg runs with prepared statements off (PgBouncer) and NullPool.
+- Storage quota: usage = sizes of the distinct digests used by the owner's non-deleted sites. Checked before files
+  are written (create + add version, owner's quota even when a token holder publishes; no owner = no check) → 413.
+  Sizes are recorded on upload; files stored before `blobs` existed are backfilled from one storage listing (which
+  returns sizes) the first time they're needed, and by the cleanup cron. `GET /api/me/usage` → `{used_bytes, quota_bytes}`.
+- `DELETE /api/sites/<id>/versions/<n>` removes a non-live version's rows (409 for the live one); next n =
+  max(current, deleted) + 1.
 - Cleanup: Vercel Cron calls `/api/cron/cleanup` daily (CRON_SECRET) and deletes blobs no published version uses
-  (older than 1 hour).
+  (older than 1 hour), and drops their `blobs` rows.
 
 ## Local data (IndexedDB `site-runner` v1)
 - `sites` (keyPath id): LocalSite incl. `versions[].manifest` and optional `remote {siteId, token, url, live, pushed}`

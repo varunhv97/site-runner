@@ -1,6 +1,6 @@
 """Key/value byte storage. LocalStorage for dev and tests, BlobStorage (Vercel Blob) in production.
 
-Every store offers: put, get (fresh=True for keys that get overwritten), delete, list.
+Every store offers: put, get (fresh=True for keys that get overwritten), delete, list (key, time, size).
 """
 
 import asyncio
@@ -55,18 +55,19 @@ class LocalStorage:
 
         await asyncio.to_thread(remove)
 
-    async def list(self, prefix: str) -> list[tuple[str, float]]:
-        """(key, uploaded at as a unix time) for every key under prefix."""
+    async def list(self, prefix: str) -> list[tuple[str, float, int]]:
+        """(key, uploaded at as a unix time, size in bytes) for every key under prefix."""
 
         def walk():
             base = self._path(prefix)
             if not base.is_dir():
                 return []
-            return [
-                (p.relative_to(self.root).as_posix(), p.stat().st_mtime)
-                for p in base.rglob("*")
-                if p.is_file() and not p.name.endswith(".tmp")
-            ]
+            out = []
+            for p in base.rglob("*"):
+                if p.is_file() and not p.name.endswith(".tmp"):
+                    st = p.stat()
+                    out.append((p.relative_to(self.root).as_posix(), st.st_mtime, st.st_size))
+            return out
 
         return await asyncio.to_thread(walk)
 
@@ -157,7 +158,7 @@ class BlobStorage:
             except httpx.HTTPError as e:
                 raise StorageError(f"blob delete failed: {e}") from e
 
-    async def list(self, prefix: str) -> list[tuple[str, float]]:
+    async def list(self, prefix: str) -> list[tuple[str, float, int]]:
         out, cursor = [], None
         try:
             async with httpx.AsyncClient(timeout=60) as client:
@@ -168,7 +169,7 @@ class BlobStorage:
                     body = r.json()
                     for b in body.get("blobs", []):
                         uploaded = calendar.timegm(time.strptime(b["uploadedAt"][:19], "%Y-%m-%dT%H:%M:%S"))
-                        out.append((b["pathname"], float(uploaded)))
+                        out.append((b["pathname"], float(uploaded), int(b.get("size") or 0)))
                     cursor = body.get("cursor")
                     if not body.get("hasMore") or not cursor:
                         return out

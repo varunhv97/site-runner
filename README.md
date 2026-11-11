@@ -71,12 +71,14 @@ branches and pull requests get preview deployments. `vercel deploy --prod` still
 | `POST` | `/api/sites/<id>/token` (replace token) | owner or token |
 | `POST` | `/api/sites/<id>/slug` `{"slug": "learn-sql"}` | owner or token |
 | `GET` | `/api/slugs/<name>` (is it free?) | — |
+| `DELETE` | `/api/sites/<id>/versions/<n>` (not the live one) | owner or token |
 | `DELETE` | `/api/sites/<id>` (unpublish) | owner, token or admin |
 | `POST` | `/api/sites/<id>/claim` | signed in + token |
-| `GET` | `/api/sites/<id>`, `/api/me/sites`, `/api/auth/me` | — / signed in / — |
+| `GET` | `/api/sites/<id>`, `/api/me/sites`, `/api/me/usage`, `/api/auth/me` | — / signed in / signed in / — |
 
 Limits: 4 MB zipped and 50 MB unzipped per version, 2,000 files, 50 sites per account, 200 versions per
-site, 100 uploads per account per day. Hidden files (`.git`, `.env`, ...) are dropped on upload.
+site, 100 uploads per account per day, 250 MB of storage per account (`STORAGE_QUOTA_MB`; a file used by many
+versions counts once). Hidden files (`.git`, `.env`, ...) are dropped on upload.
 
 ## Known limitations
 

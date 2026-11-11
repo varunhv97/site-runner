@@ -124,6 +124,10 @@ aside, section { min-width: 0; }
 }
 .btn-link.small { min-height: 32px; padding: 0 14px; font-size: 14px; }
 .share details button { margin-top: 10px; }
+.usage { display: grid; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.meter { display: block; height: 4px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--accent); }
+.meter.full span { background: var(--danger); }
 .unpublish { margin-top: 12px; }
 
 /* In-app dialogs (app/app/AppDialog.tsx) */

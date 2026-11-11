@@ -189,6 +189,15 @@ async def my_sites(request: Request):
     return {"sites": [meta | {"url": _share_url(request, _ref(meta))} for meta in await sites.user_sites(user["sub"])]}
 
 
+@app.get("/api/me/usage")
+async def my_usage(request: Request):
+    """Storage the signed-in account uses: unique files across its shared sites, against its quota."""
+    user = _current_user(request)
+    if not user:
+        raise SiteError("sign in to see your storage", 401)
+    return await sites.usage(user["sub"])
+
+
 # ---- Sites ----
 
 
@@ -262,6 +271,14 @@ async def set_slug(request: Request, site_id: str, body: SlugBody, authorization
 async def set_live(request: Request, site_id: str, body: LiveBody, authorization: str | None = Header(None)):
     _check_origin(request)
     meta = await sites.set_live(site_id, _bearer(authorization), body.version, user=_current_user(request))
+    return {"site": meta}
+
+
+@app.delete("/api/sites/{site_id}/versions/{n}")
+async def delete_version(request: Request, site_id: str, n: int, authorization: str | None = Header(None)):
+    """Remove a shared version that isn't live: its pinned link (/s/<ref>@n/) stops working."""
+    _check_origin(request)
+    meta = await sites.delete_version(site_id, _bearer(authorization), n, user=_current_user(request))
     return {"site": meta}
 
 

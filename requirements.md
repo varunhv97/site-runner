@@ -20,5 +20,7 @@ Keep **versions** of each site. Optionally **share** a version via a public link
 - **Saved localStorage (free, no extra domains).** `/s/` HTML is a wrapper page that frames the sandboxed
   `/r/` copy and keeps each site's localStorage under its site id (512K chars per site, per browser).
 - **Content-addressed files** (sha256), so unchanged files aren't duplicated across versions.
-- **Limits:** 4MB zipped per share (Vercel function body limit), 50MB unzipped, 2000 files.
+- **Limits:** 4MB zipped per share (Vercel function body limit), 50MB unzipped, 2000 files; 250MB storage per
+  account (`STORAGE_QUOTA_MB`; a file shared by many versions counts once). Shared versions that aren't live can be
+  deleted (their pinned link 404s; numbers are never reused).
 - Stack: Next.js 16 frontend + FastAPI (Vercel Python function), Vercel Blob storage in prod.

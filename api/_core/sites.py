@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import io
+import math
 import mimetypes
 import os
 import posixpath
@@ -12,11 +13,21 @@ import string
 import time
 import zipfile
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, union_all, update
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import IntegrityError
 
-from .db import create_schema, sites, slugs, uploads, users, version_files, versions
+from .db import (
+    blobs,
+    create_schema,
+    deleted_versions,
+    sites,
+    slugs,
+    uploads,
+    users,
+    version_files,
+    versions,
+)
 
 MAX_ZIP_BYTES = 4 * 1024 * 1024  # Vercel function body limit is 4.5MB
 MAX_TOTAL_BYTES = 50 * 1024 * 1024  # zip-bomb guard (uncompressed)
@@ -25,6 +36,9 @@ MAX_FILES = 2000
 MAX_SITES_PER_USER = 50
 MAX_VERSIONS_PER_SITE = 200
 MAX_UPLOADS_PER_DAY = 100
+# Storage per account: the unique files used by all versions of its sites (a shared file counts once).
+DEFAULT_STORAGE_QUOTA_MB = 250
+MB = 1024 * 1024
 
 _ID_ALPHABET = string.ascii_lowercase + string.digits
 _IGNORED = ("__MACOSX/", ".DS_Store", "Thumbs.db")
@@ -51,6 +65,20 @@ def content_type(path: str) -> str:
     if ctype.startswith("text/") or ctype in ("application/json", "image/svg+xml"):
         ctype += "; charset=utf-8"
     return ctype
+
+
+def storage_quota_bytes() -> int:
+    """STORAGE_QUOTA_MB (may be fractional), else 250 MB."""
+    try:
+        mb = float(os.environ.get("STORAGE_QUOTA_MB") or DEFAULT_STORAGE_QUOTA_MB)
+    except ValueError:
+        mb = DEFAULT_STORAGE_QUOTA_MB
+    return int(mb * MB)
+
+
+def _mb(n: int) -> str:
+    """Bytes as MB for messages, rounded up to 0.1 so 250.01 MB never reads as "250 MB"."""
+    return f"{math.ceil(n / MB * 10) / 10:g} MB"
 
 
 def _clean_path(name: str) -> str | None:
@@ -162,6 +190,17 @@ def slug_problem(slug: str) -> str | None:
 def is_admin(user: dict | None) -> bool:
     admins = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
     return bool(user and user.get("email", "").lower() in admins)
+
+
+class Upload:
+    """A validated zip: path -> bytes, path -> digest, the entry page, total size and digest -> size."""
+
+    def __init__(self, zip_bytes: bytes):
+        self.files = extract_zip(zip_bytes)
+        self.manifest = {path: hashlib.sha256(data).hexdigest() for path, data in self.files.items()}
+        self.entry = pick_entry(self.manifest)
+        self.size = sum(len(b) for b in self.files.values())
+        self.sizes = {self.manifest[path]: len(data) for path, data in self.files.items()}
 
 
 class Sites:
@@ -328,21 +367,88 @@ class Sites:
             return
         raise SiteError("sign in as the site's owner or send its edit token", 403)
 
-    async def _upload_files(self, zip_bytes: bytes) -> tuple[dict, str, int]:
-        """Validate the zip and put its files in storage. Returns (path -> digest, entry, total size).
-        Files are written before the metadata, so a version never points at a missing file."""
-        files = extract_zip(zip_bytes)
-        manifest = {}
-        for path, data in files.items():
-            digest = hashlib.sha256(data).hexdigest()
-            manifest[path] = digest
-            await self.storage.put(f"blobs/{digest}", data, content_type(path))
-        return manifest, pick_entry(manifest), sum(len(b) for b in files.values())
+    async def _store_files(self, upload: Upload) -> None:
+        """Put the upload's files in storage. Done before the metadata, so a version never points at a
+        missing file (files of an upload that then fails are removed by the cleanup job)."""
+        written = set()
+        for path, data in upload.files.items():
+            digest = upload.manifest[path]
+            if digest not in written:
+                written.add(digest)
+                await self.storage.put(f"blobs/{digest}", data, content_type(path))
 
-    async def _add_version(self, conn, site_id: str, manifest: dict, entry: str, size: int, note: str) -> int:
-        n = (
-            await conn.execute(select(func.coalesce(func.max(versions.c.n), 0)).where(versions.c.site_id == site_id))
-        ).scalar_one() + 1
+    # ---- storage quota ----
+
+    async def _owned_blob_sizes(self, sub: str) -> dict[str, int]:
+        """digest -> size of every file the user's non-deleted sites use, each counted once."""
+        q = (
+            select(version_files.c.digest, blobs.c.size)
+            .select_from(
+                version_files.join(sites, sites.c.id == version_files.c.site_id).outerjoin(
+                    blobs, blobs.c.digest == version_files.c.digest
+                )
+            )
+            .where(sites.c.owner == sub, sites.c.deleted_at.is_(None))
+            .distinct()
+        )
+        async with self.engine.connect() as conn:
+            rows = (await conn.execute(q)).all()
+        sizes = {r.digest: r.size for r in rows}
+        missing = [d for d, size in sizes.items() if size is None]
+        if missing:
+            sizes |= await self._backfill_sizes(missing)
+        return sizes
+
+    async def _backfill_sizes(self, digests: list[str]) -> dict[str, int]:
+        """Sizes of files stored before the blobs table existed, read from one storage listing (which
+        returns every file's size), then saved for every listed file so this runs about once.
+        A file missing from storage counts as 0 bytes; uploading it again records its real size."""
+        listed = {key.removeprefix("blobs/"): size for key, _, size in await self.storage.list("blobs/")}
+        await self._record_sizes(listed | {d: listed.get(d, 0) for d in digests}, overwrite=False)
+        return {d: listed.get(d, 0) for d in digests}
+
+    async def _record_sizes(self, sizes: dict[str, int], conn=None, overwrite: bool = True) -> None:
+        if not sizes:
+            return
+        if conn is None:
+            async with self.engine.begin() as c:
+                return await self._record_sizes(sizes, c, overwrite)
+        stmt = self._upsert(blobs)
+        stmt = (
+            stmt.on_conflict_do_update(index_elements=["digest"], set_={"size": stmt.excluded.size})
+            if overwrite
+            else stmt.on_conflict_do_nothing(index_elements=["digest"])
+        )
+        await conn.execute(stmt, [{"digest": d, "size": n} for d, n in sizes.items()])
+
+    async def usage(self, sub: str) -> dict:
+        await self._ready()
+        return {"used_bytes": sum((await self._owned_blob_sizes(sub)).values()), "quota_bytes": storage_quota_bytes()}
+
+    async def _check_quota(self, owner: str | None, upload: Upload) -> None:
+        """Refuse an upload whose new files would take the owner's account over its storage quota.
+        Sites without an owner (token-only, local dev without sign-in) aren't checked."""
+        if not owner:
+            return
+        owned = await self._owned_blob_sizes(owner)
+        used = sum(owned.values())
+        new = sum(size for digest, size in upload.sizes.items() if digest not in owned)
+        quota = storage_quota_bytes()
+        if used + new > quota:
+            raise SiteError(
+                f"This would use {_mb(used + new)} of your {_mb(quota)}. Delete old versions or sites to make room.",
+                413,
+            )
+
+    async def _add_version(self, conn, site_id: str, upload: Upload, note: str) -> int:
+        # numbers of deleted versions are never reused, so a pinned link can't change what it shows
+        used = union_all(
+            select(versions.c.n).where(versions.c.site_id == site_id),
+            select(deleted_versions.c.n).where(deleted_versions.c.site_id == site_id),
+        ).subquery()
+        n = (await conn.execute(select(func.coalesce(func.max(used.c.n), 0)))).scalar_one() + 1
+        manifest, entry, size = upload.manifest, upload.entry, upload.size
+        await self._record_sizes(upload.sizes, conn)
         await conn.execute(
             versions.insert().values(
                 site_id=site_id,
@@ -366,7 +472,9 @@ class Sites:
         await self._ready()
         if slug and slug_problem(slug):
             raise SiteError(slug_problem(slug), 400)
-        manifest, entry, size = await self._upload_files(zip_bytes)
+        upload = Upload(zip_bytes)
+        await self._check_quota(owner["sub"] if owner else None, upload)
+        await self._store_files(upload)
         token = secrets.token_urlsafe(24)
         site_id = await self._unused_id()
         async with self.engine.begin() as conn:
@@ -391,7 +499,7 @@ class Sites:
             )
             if slug:
                 await self._claim_slug(conn, site_id, slug)
-            await self._add_version(conn, site_id, manifest, entry, size, note)
+            await self._add_version(conn, site_id, upload, note)
             meta = await self.public_meta(site_id, conn)
         return meta, token
 
@@ -422,17 +530,24 @@ class Sites:
     ) -> dict:
         await self._ready()
         async with self.engine.connect() as conn:  # check access before spending storage on the upload
-            self.check_access(await self._site(conn, site_id), token, user)
-        manifest, entry, size = await self._upload_files(zip_bytes)
+            site = await self._site(conn, site_id)
+            self.check_access(site, token, user)
+        upload = Upload(zip_bytes)
+        await self._check_quota(site.owner, upload)  # the owner's quota, also when a token holder publishes
+        await self._store_files(upload)
         try:
             async with self.engine.begin() as conn:
                 site = await self._site(conn, site_id, lock=True)  # serialises publishes to one site
                 self.check_access(site, token, user)
                 count = (await conn.execute(select(func.count()).where(versions.c.site_id == site_id))).scalar_one()
                 if count >= MAX_VERSIONS_PER_SITE:
-                    raise SiteError(f"this site has {MAX_VERSIONS_PER_SITE} versions, the most a site can have", 429)
+                    raise SiteError(
+                        f"this site has {MAX_VERSIONS_PER_SITE} versions, the most a site can have. "
+                        "Delete old versions to make room.",
+                        429,
+                    )
                 await self._count_upload(conn, user)
-                await self._add_version(conn, site_id, manifest, entry, size, note)
+                await self._add_version(conn, site_id, upload, note)
                 return await self.public_meta(site_id, conn)
         except IntegrityError as e:  # two publishes raced for the same version number (SQLite has no row lock)
             raise SiteError("another version was published at the same moment; try again", 409) from e
@@ -447,6 +562,25 @@ class Sites:
             if not exists:
                 raise SiteError("no such version", 404)
             await conn.execute(update(sites).where(sites.c.id == site_id).values(live=n))
+            return await self.public_meta(site_id, conn)
+
+    async def delete_version(self, site_id: str, token: str | None, n: int, user: dict | None = None) -> dict:
+        """Remove one shared version: its pinned link stops working and its number is never reused.
+        The live version can't be removed. Its files are freed by the cleanup job if nothing else uses them."""
+        await self._ready()
+        async with self.engine.begin() as conn:
+            site = await self._site(conn, site_id, lock=True)
+            self.check_access(site, token, user)
+            exists = (
+                await conn.execute(select(versions.c.n).where(versions.c.site_id == site_id, versions.c.n == n))
+            ).first()
+            if not exists:
+                raise SiteError("no such version", 404)
+            if site.live == n:
+                raise SiteError("This is the live version. Make another version live first.", 409)
+            await conn.execute(delete(version_files).where(version_files.c.site_id == site_id, version_files.c.n == n))
+            await conn.execute(delete(versions).where(versions.c.site_id == site_id, versions.c.n == n))
+            await conn.execute(deleted_versions.insert().values(site_id=site_id, n=n, deleted_at=int(time.time())))
             return await self.public_meta(site_id, conn)
 
     async def delete(self, site_id: str, token: str | None, user: dict | None = None) -> None:
@@ -499,12 +633,23 @@ class Sites:
                 .distinct()
             )
             referenced = set((await conn.execute(q)).scalars())
+            known = set((await conn.execute(select(blobs.c.digest))).scalars())
         now = time.time()
+        listed = await self.storage.list("blobs/")
         orphans = [
             key
-            for key, uploaded in await self.storage.list("blobs/")
+            for key, uploaded, _ in listed
             if key.removeprefix("blobs/") not in referenced and now - uploaded > min_age_seconds
         ]
         if orphans:
             await self.storage.delete(orphans)
+        gone = {key.removeprefix("blobs/") for key in orphans}
+        if gone:
+            async with self.engine.begin() as conn:
+                await conn.execute(delete(blobs).where(blobs.c.digest.in_(gone)))
+        # sizes of files stored before the blobs table existed (the quota also fills these in lazily)
+        skip = known | gone
+        await self._record_sizes(
+            {d: size for key, _, size in listed if (d := key.removeprefix("blobs/")) not in skip}, overwrite=False
+        )
         return {"files_referenced": len(referenced), "files_deleted": len(orphans)}

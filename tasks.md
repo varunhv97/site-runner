@@ -25,6 +25,9 @@
   `tests/test_frames.py`; headless-Chrome e2e: progress survives closing the tab, sites isolated, framed-wrapper
   attack gets no data (with and without X-Frame-Options)
 
+- [x] Storage quota per account (250MB, `STORAGE_QUOTA_MB`, unique files) + `GET /api/me/usage` + usage line in /app;
+  delete a non-live shared version (`DELETE /api/sites/<id>/versions/<n>`, numbers never reused); `tests/test_quota.py`
+
 ## Next
 - [ ] Delete the old public store `site-runner-blob` in the dashboard (CLI needs an interactive confirm)
 - [ ] Disconnect Development from site-runner-db and site-runner-private (local dev uses SQLite + .data)
@@ -36,6 +39,6 @@
 - [ ] Production (`site-runner-omega.vercel.app`) is public and runs the first, broken build (API 500s). Don't `--prod` until safety items are done
 - [ ] MCP server (Python FastMCP): create_site, upload_version, list_versions, set_live, diff_versions
 - [ ] Serve shared content from a separate domain (stronger isolation; would replace the localStorage bridge)
-- [ ] Bridge gaps: IndexedDB and cookies aren't saved; popups opened by a shared site get no saved storage
 - [ ] Local preview runs same-origin as the app. Use a separate preview origin to isolate untrusted zips
+- [ ] Bridge gaps: IndexedDB and cookies aren't saved; popups opened by a shared site get no saved storage
 - [ ] Larger uploads: client-direct Blob uploads to bypass the 4.5MB function limit
