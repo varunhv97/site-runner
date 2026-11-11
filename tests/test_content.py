@@ -315,3 +315,13 @@ def test_previews_files_never_come_from_the_server(client):
         client.get("/__sr/boot", headers={"Host": f"p-0123456789AB.{DOMAIN}"}).status_code == 200
     )  # Host is case-insensitive
     assert client.get("/__sr/boot", headers=on(sid)).status_code == 404  # a site host has no boot page
+
+
+def test_vercels_injected_host_param_is_not_echoed(client):
+    # vercel.json's host rule makes Vercel add ?host=<the host> to the function's request
+    sid = site(client, slug="echo-test")["site"]["id"]
+    host = f"{sid}.{DOMAIN}"
+    r = client.get(f"/@1/?x=1&host={host}", headers={"Host": host}, follow_redirects=False)
+    assert r.headers["location"] == f"https://echo-test.{DOMAIN}/@1/?x=1"
+    r = client.get("/?host=example.com", headers={"Host": host}, follow_redirects=False)  # a site's own param stays
+    assert r.headers["location"] == f"https://echo-test.{DOMAIN}/?host=example.com"

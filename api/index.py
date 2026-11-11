@@ -10,7 +10,7 @@ import logging
 import os
 import re
 import sys
-from urllib.parse import quote
+from urllib.parse import unquote, quote
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -69,6 +69,14 @@ class HostRouter:
             return await self.inner(scope, receive, send)
 
         scope = dict(scope, headers=[(k, v) for k, v in scope["headers"] if k.lower() != b"cookie"])
+        # vercel.json's host rule makes Vercel append ?host=<this host> to the function's request (never the
+        # visitor's URL): drop it so redirects don't echo it. A site's own ?host=<anything else> is kept.
+        host = (headers.get("host") or "").lower()
+        query = scope.get("query_string", b"").decode("latin-1")
+        if query and host:
+            pairs = [p.partition("=") for p in query.split("&")]
+            kept = [k + eq + v for k, eq, v in pairs if not (k == "host" and unquote(v).lower() == host)]
+            scope["query_string"] = "&".join(kept).encode("latin-1")
 
         async def send_content(message):
             if message["type"] == "http.response.start":
