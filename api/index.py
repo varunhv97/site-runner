@@ -15,10 +15,10 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response  # noqa: 
 from pydantic import BaseModel  # noqa: E402
 from sqlalchemy.exc import OperationalError  # noqa: E402
 
-from _core import auth  # noqa: E402
+from _core import abuse, auth  # noqa: E402
 from _core.frames import FRAME_VERSION, frame_page, wrapper_page  # noqa: E402
 from _core.db import make_engine  # noqa: E402
-from _core.sites import SiteError, Sites, content_type  # noqa: E402
+from _core.sites import SiteError, Sites, content_type, is_admin  # noqa: E402
 from _core.storage import StorageError, make_storage, oidc_token  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
@@ -106,6 +106,12 @@ def _check_origin(request: Request) -> None:
     origin = request.headers.get("origin")
     if origin is not None and origin != _base_url(request):
         raise SiteError("request from another origin", 403)
+
+
+async def _can_share(user: dict | None, site_id: str | None = None) -> None:
+    """Banned accounts can't share: refuses writes by a banned user, and writes (also with an edit token) to a
+    banned owner's site. Every share write route calls this before doing anything."""
+    await abuse.check_can_share(sites, user, site_id)
 
 
 @app.get("/api/health")
@@ -222,6 +228,7 @@ async def create_site(
     if not auth.enabled() and os.environ.get("VERCEL_ENV") == "production":
         # no anonymous public hosting: production shares only once Google sign-in is configured
         raise SiteError("Sharing opens once Google sign-in is set up on this site", 503)
+    await _can_share(user)
     meta, token = await sites.create(
         name, await file.read(), note, owner=user, slug=slug.strip().lower() or None, entry=entry or None
     )
@@ -243,6 +250,7 @@ async def add_version(
     authorization: str | None = Header(None),
 ):
     _check_origin(request)
+    await _can_share(_current_user(request), site_id)
     meta = await sites.add_version(
         site_id, _bearer(authorization), await file.read(), note, user=_current_user(request), entry=entry or None
     )
@@ -276,6 +284,7 @@ async def slug_available(slug: str):
 async def set_slug(request: Request, site_id: str, body: SlugBody, authorization: str | None = Header(None)):
     """Give a site a link name (/s/<slug>/). Earlier names keep working and forward to the new one."""
     _check_origin(request)
+    await _can_share(_current_user(request), site_id)
     meta = await sites.set_slug(site_id, _bearer(authorization), body.slug.strip().lower(), _current_user(request))
     return {"site": meta, "url": _share_url(request, _ref(meta))}
 
@@ -283,6 +292,7 @@ async def set_slug(request: Request, site_id: str, body: SlugBody, authorization
 @app.post("/api/sites/{site_id}/live")
 async def set_live(request: Request, site_id: str, body: LiveBody, authorization: str | None = Header(None)):
     _check_origin(request)
+    await _can_share(_current_user(request), site_id)
     meta = await sites.set_live(site_id, _bearer(authorization), body.version, user=_current_user(request))
     return {"site": meta}
 
@@ -314,6 +324,7 @@ async def site_file(request: Request, site_id: str, digest: str, authorization: 
 async def set_entry(request: Request, site_id: str, n: int, body: EntryBody, authorization: str | None = Header(None)):
     """Change the page a shared version opens on."""
     _check_origin(request)
+    await _can_share(_current_user(request), site_id)
     meta = await sites.set_entry(site_id, _bearer(authorization), n, body.entry, _current_user(request))
     return {"site": meta}
 
@@ -332,6 +343,8 @@ async def delete_site(request: Request, site_id: str, authorization: str | None 
     _check_origin(request)
     user = _current_user(request)
     await sites.delete(site_id, _bearer(authorization), user)
+    if is_admin(user):
+        await abuse.action_site_reports(sites, [site_id], user)  # a takedown settles the site's open reports
     log.info("site %s unpublished by %s", site_id, user["email"] if user else "token")
     return {"ok": True}
 
@@ -339,6 +352,7 @@ async def delete_site(request: Request, site_id: str, authorization: str | None 
 @app.post("/api/sites/{site_id}/token")
 async def rotate_token(request: Request, site_id: str, authorization: str | None = Header(None)):
     _check_origin(request)
+    await _can_share(_current_user(request), site_id)
     token = await sites.rotate_token(site_id, _bearer(authorization), _current_user(request))
     return {"edit_token": token}
 
@@ -350,6 +364,7 @@ async def claim_site(request: Request, site_id: str, authorization: str | None =
     user = _current_user(request)
     if not user:
         raise SiteError("sign in to claim a site", 401)
+    await _can_share(user, site_id)
     meta = await sites.claim(site_id, _bearer(authorization), user)
     return {"site": meta}
 
@@ -359,6 +374,96 @@ async def get_site(site_id: str):
     return {"site": await sites.public_meta(site_id)}
 
 
+# ---- Abuse: reports, admin review, bans ----
+
+
+class ReportBody(BaseModel):
+    url: str
+    reason: str
+    details: str = ""
+    contact: str = ""
+
+
+class ReportStatusBody(BaseModel):
+    status: str
+
+
+class BanBody(BaseModel):
+    email: str
+    reason: str = ""
+
+
+def _client_ip(request: Request) -> str:
+    """The visitor's IP for rate limits. Vercel sets X-Real-IP / X-Forwarded-For itself (clients can't spoof
+    them there); elsewhere these headers are only as trustworthy as the proxy in front."""
+    forwarded = request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for", "").split(",")[0]
+    return forwarded.strip() or (request.client.host if request.client else "unknown")
+
+
+def _require_admin(request: Request) -> dict:
+    user = _current_user(request)
+    if not is_admin(user):
+        raise SiteError("admins only", 403)
+    return user
+
+
+@app.post("/api/reports")
+async def report_site(request: Request, body: ReportBody):
+    """Report a shared site (anyone, signed in or not). Rate-limited per IP."""
+    _check_origin(request)
+    report = await abuse.create_report(
+        sites,
+        url=body.url,
+        reason=body.reason,
+        details=body.details,
+        contact=body.contact,
+        user=_current_user(request),
+        ip=_client_ip(request),
+        base_url=_base_url(request),
+    )
+    log.info("report %s about site %s (%s)", report["id"], report["site_id"], body.reason)
+    return {"ok": True, "id": report["id"]}
+
+
+@app.get("/api/admin/reports")
+async def admin_reports(request: Request, status: str = "open"):
+    _require_admin(request)
+    rows = await abuse.list_reports(sites, status)
+    return {"reports": [r | {"site_url": _share_url(request, r["slug"] or r["site_id"])} for r in rows]}
+
+
+@app.post("/api/admin/reports/{report_id}")
+async def admin_report_status(request: Request, report_id: int, body: ReportStatusBody):
+    _check_origin(request)
+    admin = _require_admin(request)
+    return {"report": await abuse.set_report_status(sites, report_id, body.status, admin)}
+
+
+@app.get("/api/admin/bans")
+async def admin_bans(request: Request):
+    _require_admin(request)
+    return {"bans": await abuse.list_bans(sites)}
+
+
+@app.post("/api/admin/bans")
+async def admin_ban(request: Request, body: BanBody):
+    """Ban an account by email: it can't share, and its shared sites are unpublished."""
+    _check_origin(request)
+    admin = _require_admin(request)
+    result = await abuse.ban(sites, body.email, body.reason, admin)
+    log.info("%s banned by %s; unpublished %s", result["ban"]["email"], admin["email"], result["sites_unpublished"])
+    return result
+
+
+@app.delete("/api/admin/bans/{email}")
+async def admin_unban(request: Request, email: str):
+    _check_origin(request)
+    admin = _require_admin(request)
+    await abuse.unban(sites, email)
+    log.info("%s unbanned by %s", email, admin["email"])
+    return {"ok": True}
+
+
 @app.get("/api/cron/cleanup")
 async def cron_cleanup(authorization: str | None = Header(None)):
     """Daily Vercel Cron job (vercel.json). Vercel sends "Authorization: Bearer $CRON_SECRET"."""
@@ -366,6 +471,7 @@ async def cron_cleanup(authorization: str | None = Header(None)):
     if not secret or not authorization or not hmac.compare_digest(authorization, f"Bearer {secret}"):
         raise SiteError("not allowed", 401)
     result = await sites.cleanup()
+    result["rate_limits_pruned"] = await abuse.prune_rate_limits(sites)
     log.info("cleanup: %s", result)
     return result
 
