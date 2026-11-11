@@ -19,6 +19,8 @@
 
 - [x] In-app dialogs instead of browser prompt/confirm; custom link names (/s/<name>/), unique, never reused
 
+- [x] GitHub repo (public) connected to Vercel: pushes to main deploy production
+
 ## Next
 - [ ] Delete the old public store `site-runner-blob` in the dashboard (CLI needs an interactive confirm)
 - [ ] Disconnect Development from site-runner-db and site-runner-private (local dev uses SQLite + .data)

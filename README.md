@@ -57,8 +57,9 @@ and `https://<your domain>/api/auth/callback`.
 
 ## Deploying
 
-`vercel deploy --prod`. `vercel.json` routes `/api/*` and `/s/*` to `api/index.py`; Python dependencies
-come from `pyproject.toml`.
+The Vercel project is connected to this repo: every push to `main` deploys to production, and other
+branches and pull requests get preview deployments. `vercel deploy --prod` still works by hand.
+`vercel.json` routes `/api/*` and `/s/*` to `api/index.py`; Python dependencies come from `pyproject.toml`.
 
 ## API
 
