@@ -13,11 +13,12 @@ Keep **versions** of each site. Optionally **share** a version via a public link
 - Live link `/s/<id>/` follows the live version; `/s/<id>@<n>/` pins a version. "Make live" = rollback/promote.
   Both redirect to the site's own host: `<link name>.sites.spinsite.app/` (its id without a name) and `/@<n>/`.
   One host per site; renaming moves it (visitors' saved data starts fresh).
-- (Planned) MCP server so agents can publish/rollback with the edit token.
+- Account API tokens for CLI/MCP clients (create, list, revoke in /app).
+- (Planned) `spinsite` CLI (deploy, sites, versions, live, rm, usage) with `spinsite mcp` exposing the same as MCP tools.
 
 ## Key decisions
 - **Local-first.** Nothing leaves the device until you click Share.
-- **Accounts only for sharing.** Sign in with Google to share; running locally needs no account. Edit tokens remain for API/MCP.
+- **Accounts only for sharing.** Sign in with Google to share; running locally needs no account. Edit tokens remain for one site; account API tokens (made in /app) let a CLI/MCP act as the account.
 - **Security.** The app origin never runs user HTML. Each shared site and each local preview gets its own
   origin under `sites.spinsite.app` (sandbox CSP with allow-same-origin, no server cookies), so it can't read
   the app's storage, cookies or tokens, and real localStorage/IndexedDB/cookies work per site.

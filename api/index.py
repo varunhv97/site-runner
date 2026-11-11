@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response  # noqa: 
 from pydantic import BaseModel  # noqa: E402
 from sqlalchemy.exc import OperationalError  # noqa: E402
 
-from _core import abuse, auth, hosts  # noqa: E402
+from _core import abuse, api_tokens, auth, hosts  # noqa: E402
 from _core.content import CONTENT_HEADERS, held, make_content_app, not_found  # noqa: E402
 from _core.db import make_engine  # noqa: E402
 from _core.sites import SiteError, Sites, is_admin  # noqa: E402
@@ -115,10 +115,16 @@ async def unexpected_error_handler(request: Request, exc: Exception):
     return JSONResponse({"error": "Something went wrong on the server."}, status_code=500)
 
 
-def _bearer(authorization: str | None) -> str | None:
+def _bearer_value(authorization: str | None) -> str | None:
     if authorization and authorization.lower().startswith("bearer "):
         return authorization[7:].strip()
     return None
+
+
+def _bearer(authorization: str | None) -> str | None:
+    """A site's edit token from the Authorization header. An account API token (srk_...) isn't one."""
+    value = _bearer_value(authorization)
+    return None if api_tokens.is_api_token(value) else value
 
 
 def _base_url(request: Request) -> str:
@@ -150,10 +156,26 @@ def _cookie(request: Request, name: str) -> str:
     return auth.cookie_name(name, _secure(request))
 
 
-def _current_user(request: Request) -> dict | None:
+def _session_user(request: Request) -> dict | None:
+    """The account signed in with Google in this browser (session cookie). Admin work and API token management
+    need this; an API token isn't enough."""
     if not auth.enabled():
         return None
     return auth.verify(request.cookies.get(_cookie(request, auth.SESSION_COOKIE)))
+
+
+async def _current_user(request: Request) -> dict | None:
+    """The browser session's account, else the account an API token (Authorization: Bearer srk_...) acts as.
+    An unknown or revoked API token is a 401 rather than "signed out", so a CLI can say so."""
+    user = _session_user(request)
+    if user or not auth.enabled():
+        return user
+    if not hasattr(request.state, "token_user"):
+        value = _bearer_value(request.headers.get("authorization"))
+        request.state.token_user = await api_tokens.user_for(sites, value) if api_tokens.is_api_token(value) else None
+        if api_tokens.is_api_token(value) and not request.state.token_user:
+            raise SiteError("this API token is invalid or was revoked", 401)
+    return request.state.token_user
 
 
 def _content_config() -> dict:
@@ -263,13 +285,13 @@ async def logout(request: Request):
 
 @app.get("/api/auth/me")
 async def me(request: Request):
-    user = _current_user(request)
+    user = await _current_user(request)
     return {"enabled": auth.enabled(), "user": {"email": user["email"], "name": user["name"]} if user else None}
 
 
 @app.get("/api/me/sites")
 async def my_sites(request: Request):
-    user = _current_user(request)
+    user = await _current_user(request)
     if not user:
         raise SiteError("sign in to list your sites", 401)
     return {"sites": [meta | {"url": _share_url(request, _ref(meta))} for meta in await sites.user_sites(user["sub"])]}
@@ -278,10 +300,46 @@ async def my_sites(request: Request):
 @app.get("/api/me/usage")
 async def my_usage(request: Request):
     """Storage the signed-in account uses: unique files across its shared sites, against its quota."""
-    user = _current_user(request)
+    user = await _current_user(request)
     if not user:
         raise SiteError("sign in to see your storage", 401)
     return await sites.usage(user["sub"])
+
+
+# ---- API tokens (CLI and MCP clients act as the account; managed only from a browser session) ----
+
+
+class TokenBody(BaseModel):
+    name: str = ""
+
+
+def _browser_user(request: Request) -> dict:
+    user = _session_user(request)
+    if not user:
+        raise SiteError("sign in with Google in the browser to manage API tokens", 401)
+    return user
+
+
+@app.get("/api/me/tokens")
+async def list_api_tokens(request: Request):
+    return {"tokens": await api_tokens.list_tokens(sites, _browser_user(request)["sub"])}
+
+
+@app.post("/api/me/tokens")
+async def create_api_token(request: Request, body: TokenBody):
+    """A new token, returned once. Only its hash is kept."""
+    _check_origin(request)
+    user = _browser_user(request)
+    await _can_share(user)
+    meta, token = await api_tokens.create(sites, user, body.name)
+    return {"token": meta, "secret": token}
+
+
+@app.delete("/api/me/tokens/{token_id}")
+async def revoke_api_token(request: Request, token_id: str):
+    _check_origin(request)
+    await api_tokens.revoke(sites, _browser_user(request)["sub"], token_id)
+    return {"ok": True}
 
 
 # ---- Sites ----
@@ -297,7 +355,7 @@ async def create_site(
     entry: str = Form(""),
 ):
     _check_origin(request)
-    user = _current_user(request)
+    user = await _current_user(request)
     if auth.enabled() and not user:
         raise SiteError("sign in with Google to share a site", 401)
     if not auth.enabled() and os.environ.get("VERCEL_ENV") == "production":
@@ -325,9 +383,10 @@ async def add_version(
     authorization: str | None = Header(None),
 ):
     _check_origin(request)
-    await _can_share(_current_user(request), site_id)
+    user = await _current_user(request)
+    await _can_share(user, site_id)
     meta = await sites.add_version(
-        site_id, _bearer(authorization), await file.read(), note, user=_current_user(request), entry=entry or None
+        site_id, _bearer(authorization), await file.read(), note, user=user, entry=entry or None
     )
     return {
         "site": meta,
@@ -359,30 +418,32 @@ async def slug_available(slug: str):
 async def set_slug(request: Request, site_id: str, body: SlugBody, authorization: str | None = Header(None)):
     """Give a site a link name (/s/<slug>/). Earlier names keep working and forward to the new one."""
     _check_origin(request)
-    await _can_share(_current_user(request), site_id)
-    meta = await sites.set_slug(site_id, _bearer(authorization), body.slug.strip().lower(), _current_user(request))
+    user = await _current_user(request)
+    await _can_share(user, site_id)
+    meta = await sites.set_slug(site_id, _bearer(authorization), body.slug.strip().lower(), user)
     return {"site": meta, "url": _share_url(request, _ref(meta))}
 
 
 @app.post("/api/sites/{site_id}/live")
 async def set_live(request: Request, site_id: str, body: LiveBody, authorization: str | None = Header(None)):
     _check_origin(request)
-    await _can_share(_current_user(request), site_id)
-    meta = await sites.set_live(site_id, _bearer(authorization), body.version, user=_current_user(request))
+    user = await _current_user(request)
+    await _can_share(user, site_id)
+    meta = await sites.set_live(site_id, _bearer(authorization), body.version, user=user)
     return {"site": meta}
 
 
 @app.get("/api/sites/{site_id}/versions/{n}/files")
 async def version_files(request: Request, site_id: str, n: int, authorization: str | None = Header(None)):
     """A version's files and start page, so its owner can open the site in another browser."""
-    return await sites.version_files(site_id, _bearer(authorization), n, _current_user(request))
+    return await sites.version_files(site_id, _bearer(authorization), n, await _current_user(request))
 
 
 @app.get("/api/sites/{site_id}/files/{digest}")
 async def site_file(request: Request, site_id: str, digest: str, authorization: str | None = Header(None)):
     """One file's original bytes for the owner. Always a sandboxed download: the bytes are a shared site's
     (untrusted) content, so they must never render on this app's origin."""
-    data = await sites.site_blob(site_id, _bearer(authorization), digest, _current_user(request))
+    data = await sites.site_blob(site_id, _bearer(authorization), digest, await _current_user(request))
     return Response(
         data,
         media_type="application/octet-stream",
@@ -399,8 +460,9 @@ async def site_file(request: Request, site_id: str, digest: str, authorization: 
 async def set_entry(request: Request, site_id: str, n: int, body: EntryBody, authorization: str | None = Header(None)):
     """Change the page a shared version opens on."""
     _check_origin(request)
-    await _can_share(_current_user(request), site_id)
-    meta = await sites.set_entry(site_id, _bearer(authorization), n, body.entry, _current_user(request))
+    user = await _current_user(request)
+    await _can_share(user, site_id)
+    meta = await sites.set_entry(site_id, _bearer(authorization), n, body.entry, user)
     return {"site": meta}
 
 
@@ -408,7 +470,7 @@ async def set_entry(request: Request, site_id: str, n: int, body: EntryBody, aut
 async def delete_version(request: Request, site_id: str, n: int, authorization: str | None = Header(None)):
     """Remove a shared version that isn't live: its pinned link (/s/<ref>@n/) stops working."""
     _check_origin(request)
-    meta = await sites.delete_version(site_id, _bearer(authorization), n, user=_current_user(request))
+    meta = await sites.delete_version(site_id, _bearer(authorization), n, user=await _current_user(request))
     return {"site": meta}
 
 
@@ -416,7 +478,7 @@ async def delete_version(request: Request, site_id: str, n: int, authorization: 
 async def delete_site(request: Request, site_id: str, authorization: str | None = Header(None)):
     """Unpublish: the owner, the token holder, or an admin (ADMIN_EMAILS) for takedowns."""
     _check_origin(request)
-    user = _current_user(request)
+    user = await _current_user(request)
     await sites.delete(site_id, _bearer(authorization), user)
     if is_admin(user):
         await abuse.action_site_reports(sites, [site_id], user)  # a takedown settles the site's open reports
@@ -427,8 +489,9 @@ async def delete_site(request: Request, site_id: str, authorization: str | None 
 @app.post("/api/sites/{site_id}/token")
 async def rotate_token(request: Request, site_id: str, authorization: str | None = Header(None)):
     _check_origin(request)
-    await _can_share(_current_user(request), site_id)
-    token = await sites.rotate_token(site_id, _bearer(authorization), _current_user(request))
+    user = await _current_user(request)
+    await _can_share(user, site_id)
+    token = await sites.rotate_token(site_id, _bearer(authorization), user)
     return {"edit_token": token}
 
 
@@ -436,7 +499,7 @@ async def rotate_token(request: Request, site_id: str, authorization: str | None
 async def claim_site(request: Request, site_id: str, authorization: str | None = Header(None)):
     """Attach a site shared before sign-in to the signed-in account, proven by its edit token."""
     _check_origin(request)
-    user = _current_user(request)
+    user = await _current_user(request)
     if not user:
         raise SiteError("sign in to claim a site", 401)
     await _can_share(user, site_id)
@@ -476,7 +539,7 @@ def _client_ip(request: Request) -> str:
 
 
 def _require_admin(request: Request) -> dict:
-    user = _current_user(request)
+    user = _session_user(request)
     if not is_admin(user):
         raise SiteError("admins only", 403)
     return user
@@ -490,7 +553,7 @@ class HoldDecision(BaseModel):
 
 
 def _admin_for_holds(request: Request) -> dict:
-    if not _current_user(request):
+    if not _session_user(request):
         raise SiteError("sign in as an admin", 401)
     return _require_admin(request)
 
@@ -505,7 +568,7 @@ async def report_site(request: Request, body: ReportBody):
         reason=body.reason,
         details=body.details,
         contact=body.contact,
-        user=_current_user(request),
+        user=_session_user(request),
         ip=_client_ip(request),
         base_url=_base_url(request),
     )
@@ -555,7 +618,7 @@ async def admin_unban(request: Request, email: str):
 @app.get("/api/sites/{site_id}/hold")
 async def site_hold(request: Request, site_id: str, authorization: str | None = Header(None)):
     """{"held": bool, "reasons": [...]} for the owner, so /app can show why links don't work yet."""
-    return await holds.owner_status(sites, site_id, _bearer(authorization), _current_user(request))
+    return await holds.owner_status(sites, site_id, _bearer(authorization), await _current_user(request))
 
 
 @app.get("/api/admin/holds")

@@ -206,6 +206,9 @@ def slug_problem(slug: str) -> str | None:
 
 
 def is_admin(user: dict | None) -> bool:
+    """Admin work needs a browser sign-in: an API token (api_tokens.py) never counts, even an admin's."""
+    if user and user.get("via") == "api_token":
+        return False
     admins = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
     return bool(user and user.get("email", "").lower() in admins)
 

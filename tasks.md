@@ -55,6 +55,9 @@
 - [x] Sites live on their link name (2026-11-11): `<name>.sites.spinsite.app` (id without a name); the id and earlier
   names 308 to it; rename warns that visitors' saved data resets; `p-` names reserved
 
+- [x] Account API tokens (2026-11-11): `srk_…` bearer acts as the account (create/list/revoke from a browser
+  session only, never admin, bans apply); panel in /app; `tests/test_api_tokens.py`
+
 ## Next
 - [ ] Deploy the content origin: DNS + second Vercel project (docs/deploying.md), then check a live share link
 - [ ] Submit sites.spinsite.app to the Public Suffix List (until then sites are same-site with each other and the app)
@@ -64,5 +67,8 @@
 - [ ] Optional: a Neon `dev` branch for testing against real Postgres
 - [ ] Add Alembic migrations before the first schema change
 - [ ] Optional expiry for old shares
-- [ ] MCP server (Python FastMCP): create_site, upload_version, list_versions, set_live, diff_versions
+- [ ] `spinsite` CLI (Python, httpx + typer, pipx/uvx): login (paste token; device flow later), deploy ./dir,
+  sites, versions, live, rm, rename, usage. Needs a versions-list endpoint for the account
+- [ ] `spinsite mcp`: the same commands as MCP tools over stdio (FastMCP); reads files from disk, not tool args
+- [ ] Upload only changed files (digests are content-addressed) to ease the 4MB limit
 - [ ] Larger uploads: client-direct Blob uploads to bypass the 4.5MB function limit

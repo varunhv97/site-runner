@@ -15,6 +15,7 @@ import {
 import { executableMessage, findExecutable } from "@/lib/executables";
 import { describe as describeSecret, scanFiles } from "@/lib/secrets";
 import { useDialog } from "./AppDialog";
+import ApiTokens from "./ApiTokens";
 import Preview from "./Preview";
 import { cleanUpOldPreview, contentConfig, type ContentConfig } from "@/lib/preview";
 import {
@@ -369,6 +370,7 @@ export default function Home() {
               </span>
             </div>
           )}
+          {me.user && <ApiTokens ask={ask} onError={setError} />}
         </aside>
 
         <section>

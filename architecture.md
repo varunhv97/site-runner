@@ -50,6 +50,10 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
 - Cookie names get the `__Host-` prefix over https (see Origins). Routes: `/api/auth/login`, `/api/auth/callback`, `/api/auth/logout`, `/api/auth/me`, `/api/me/sites`, `/api/sites/<id>/claim`.
 - With GOOGLE_CLIENT_ID/SECRET set, sharing requires sign-in; the owner publishes without a token; edit tokens still work (API/MCP).
 - Browser writes must send this app's exact Origin (shared sites and previews have their own and are refused).
+- API tokens (`_core/api_tokens.py`, table `api_tokens`): `Authorization: Bearer srk_…` acts as the account
+  (CLI/MCP). `_current_user` = session cookie, else token (unknown/revoked → 401); `_bearer` ignores `srk_` so it's
+  never checked as an edit token. Created/listed/revoked only with a browser session (`/api/me/tokens`, panel in
+  /app); never admin (`is_admin` refuses `via=api_token`); bans and limits apply. Hash stored; max 20 per account.
 - Unpublish sets `sites.deleted_at` (links 404); admins (ADMIN_EMAILS) can unpublish any site.
 - Limits per account: 50 sites, 200 versions a site (current ones; deleting frees room), 100 uploads a day,
   storage quota (below). Hidden files are dropped (client and server). Local dev reads keys from `.env.auth.local`.
@@ -57,7 +61,7 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
 ## Data (server)
 - **Database** (`_core/db.py`): `sites` (owner, token hash, live version, deleted_at), `versions`,
   `version_files` (site, version, path → sha256), `slugs` (link names, never deleted; newest = current),
-  `users`, `uploads` (per user per day), `blobs` (digest → size), `deleted_versions` (site, n: never reused),
+  `users`, `api_tokens`, `uploads` (per user per day), `blobs` (digest → size), `deleted_versions` (site, n: never reused),
   `reports`, `bans`, `rate_limits` (abuse, below), `holds` (upload safety, below). `/s/<ref>` resolves a random id first, then a link name (old names too), then 308s to the id host.
   Publishing is one transaction with the site row locked (`FOR UPDATE`); serving a file is one indexed lookup.
   Schema is created on first use (`create_all`); add migrations (Alembic) before changing columns.

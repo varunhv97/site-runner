@@ -284,3 +284,27 @@ export async function downloadLiveVersion(site: AccountSite): Promise<{ files: F
   }
   return { files, entry: v.entry, n };
 }
+
+/** Personal API tokens: a CLI or MCP client acts as this account with one. Managed only while signed in here. */
+export type ApiToken = { id: string; name: string; hint: string; created_at: number; last_used_at: number | null };
+
+export async function fetchApiTokens(): Promise<ApiToken[]> {
+  try {
+    return (await call<{ tokens: ApiToken[] }>("/api/me/tokens", {})).tokens;
+  } catch {
+    return [];
+  }
+}
+
+/** Returns the new token's secret, which the server never shows again. */
+export async function createApiToken(name: string): Promise<{ token: ApiToken; secret: string }> {
+  return call("/api/me/tokens", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function revokeApiToken(id: string): Promise<void> {
+  await call(`/api/me/tokens/${id}`, { method: "DELETE" });
+}

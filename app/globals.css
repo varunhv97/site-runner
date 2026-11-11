@@ -138,6 +138,17 @@ aside, section { min-width: 0; }
 .meter span { display: block; height: 100%; background: var(--accent); }
 .meter.full span { background: var(--danger); }
 .unpublish { margin-top: 12px; }
+.api-tokens { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.api-tokens summary { cursor: pointer; }
+.api-tokens ul { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.api-tokens li { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.api-tokens li > span { display: grid; gap: 2px; min-width: 0; }
+.api-tokens strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.api-tokens > button { margin-top: 10px; }
+.api-token-secret { display: grid; gap: 8px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: var(--r-md); }
+.api-token-secret p { margin: 0; }
+.api-token-secret code { word-break: break-all; font: 13px/1.4 var(--font-mono), monospace; }
+.api-token-secret button { justify-self: start; }
 
 /* In-app dialogs (app/app/AppDialog.tsx) */
 .app-dialog {

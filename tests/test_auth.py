@@ -286,7 +286,7 @@ def test_writes_from_shared_site_subdomains_are_refused(client, monkeypatch):
     """Shared sites are same-site with the app (sites.spinsite.app), so the browser sends the session cookie
     with their requests. The exact-origin check is what refuses them."""
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://spinsite.app")
-    monkeypatch.setattr(server, "_current_user", lambda request: ALICE)
+    monkeypatch.setattr(server, "_session_user", lambda request: ALICE)
     for origin in ("https://abc.sites.spinsite.app", "https://p-0123456789ab.sites.spinsite.app", "null"):
         assert share(client, headers={"Origin": origin}).status_code == 403, origin
         assert client.post("/api/sites/abc/token", headers={"Origin": origin}).status_code == 403, origin

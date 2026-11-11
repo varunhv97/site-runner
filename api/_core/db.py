@@ -90,6 +90,22 @@ uploads = Table(
 )
 
 
+# Personal API tokens (_core/api_tokens.py): act as the account from a CLI or MCP client. Only the hash is stored;
+# revoking deletes the row.
+api_tokens = Table(
+    "api_tokens",
+    metadata,
+    Column("id", String(16), primary_key=True),
+    Column("sub", String(255), nullable=False),
+    Column("name", String(60), nullable=False, default=""),
+    Column("token_hash", String(64), nullable=False, unique=True),
+    Column("hint", String(16), nullable=False),  # the token's last characters, to tell tokens apart in the list
+    Column("created_at", Integer, nullable=False),
+    Column("last_used_at", Integer, nullable=True),
+    Index("ix_api_tokens_sub", "sub"),
+)
+
+
 # Size of each stored file (blobs/<digest>), for the per-account storage quota. Its own table because
 # create_all can add tables but not columns. Files stored before it existed get a row lazily (Sites._sizes).
 blobs = Table(
