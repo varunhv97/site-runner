@@ -128,7 +128,7 @@ aside, section { min-width: 0; }
 
 /* In-app dialogs (app/app/AppDialog.tsx) */
 .app-dialog {
-  width: min(440px, calc(100vw - 32px)); padding: 0; margin: auto;
+  width: min(480px, calc(100vw - 32px)); padding: 0; margin: auto;
   color: var(--ink); background: var(--surface);
   border: 1px solid var(--line); border-radius: var(--r-lg);
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
@@ -143,12 +143,19 @@ aside, section { min-width: 0; }
 .app-dialog h2 { margin: 0; font-size: 22px; line-height: 1.25; text-wrap: balance; }
 .app-dialog__message { margin: -4px 0 0; color: var(--muted); font-size: 15px; }
 .app-dialog__field { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
-.app-dialog__field input {
-  font: 400 16px/1.4 var(--font-text), sans-serif; color: var(--ink);
+.app-dialog__control {
+  display: flex; align-items: center; min-height: 44px;
   background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-md);
-  min-height: 44px; padding: 0 12px;
 }
+.app-dialog__control:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.app-dialog__control.has-error { border-color: var(--danger); }
+.app-dialog__prefix { padding-left: 12px; color: var(--muted); font: 14px/1 var(--font-mono), monospace; white-space: nowrap; }
+.app-dialog__field input {
+  flex: 1; min-width: 0; font: 400 16px/1.4 var(--font-text), sans-serif; color: var(--ink);
+  background: transparent; border: 0; min-height: 42px; padding: 0 12px 0 6px; outline: none;
+}
+.app-dialog__control:not(:has(.app-dialog__prefix)) input { padding-left: 12px; }
 .app-dialog__field input::placeholder { color: rgba(154, 163, 154, 0.7); }
-.app-dialog__field input:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.app-dialog__error { min-height: 20px; color: var(--danger); font-size: 14px; }
 .app-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
 button.danger-solid { background: var(--danger); color: #2a0d08; border-color: var(--danger); }

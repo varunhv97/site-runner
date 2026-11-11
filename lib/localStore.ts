@@ -13,6 +13,7 @@ export type LocalVersion = {
 
 export type RemoteLink = {
   siteId: string;
+  slug?: string | null; // the custom link name, when it has one
   token: string;
   url: string;
   live: number | null;

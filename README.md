@@ -5,8 +5,10 @@ Live at [spinsite.vercel.app](https://spinsite.vercel.app).
 
 - **Local first.** Drop in HTML files, a folder or a zip. A Service Worker serves them from IndexedDB, so
   relative links, CSS and scripts work, and nothing is uploaded until you press Share.
-- **Versions.** Every upload is a version. Shared sites have a live link (`/s/<id>/`) that follows the live
-  version and pinned links (`/s/<id>@3/`). Rolling back moves the live pointer.
+- **Versions.** Every upload is a version. Shared sites have a live link that follows the live version and
+  pinned links (`@3`). Rolling back moves the live pointer.
+- **Link names.** Pick a name like `/s/learn-sql/`, unique across all users. Names are never reused; after a
+  rename the old name forwards to the new one.
 - **Sign in with Google to share.** Owners publish, roll back, unpublish and replace edit tokens. Edit tokens
   also work for API and MCP clients.
 - **Sandboxed.** Shared pages run with `Content-Security-Policy: sandbox` (no origin of their own), so they
@@ -62,10 +64,12 @@ come from `pyproject.toml`.
 
 | Method | Path | Auth |
 | --- | --- | --- |
-| `POST` | `/api/sites` (zip, name, note) | signed in |
+| `POST` | `/api/sites` (zip, name, note, optional slug) | signed in |
 | `POST` | `/api/sites/<id>/versions` | owner or `Authorization: Bearer <edit token>` |
 | `POST` | `/api/sites/<id>/live` `{"version": n}` | owner or token |
 | `POST` | `/api/sites/<id>/token` (replace token) | owner or token |
+| `POST` | `/api/sites/<id>/slug` `{"slug": "learn-sql"}` | owner or token |
+| `GET` | `/api/slugs/<name>` (is it free?) | — |
 | `DELETE` | `/api/sites/<id>` (unpublish) | owner, token or admin |
 | `POST` | `/api/sites/<id>/claim` | signed in + token |
 | `GET` | `/api/sites/<id>`, `/api/me/sites`, `/api/auth/me` | — / signed in / — |

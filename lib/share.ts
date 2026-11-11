@@ -4,7 +4,32 @@ import { readVersionFiles, type LocalSite, type LocalVersion } from "./localStor
 
 const MAX_ZIP = 4 * 1024 * 1024;
 
-type RemoteSite = { id: string; live: number | null; versions: { n: number }[] };
+type RemoteSite = { id: string; slug: string | null; live: number | null; versions: { n: number }[] };
+
+/** A suggestion for a link name from a site's name: "Trail Map v2!" -> "trail-map-v2". */
+export function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/, "");
+}
+
+/** Lower-cases and swaps spaces as you type, without trimming hyphens mid-word. */
+export const normalizeSlug = (v: string) => v.toLowerCase().replace(/[\s_]+/g, "-").replace(/[^a-z0-9-]/g, "");
+
+/** null when the name can be used, else why not. Blank is fine: the site gets a random link. */
+export async function checkSlug(slug: string, current?: string | null): Promise<string | null> {
+  if (!slug || slug === current) return null;
+  try {
+    const r = await call<{ available: boolean; reason: string | null }>(`/api/slugs/${encodeURIComponent(slug)}`, {});
+    return r.available ? null : r.reason;
+  } catch {
+    return null; // let the server decide on submit
+  }
+}
 
 class ApiError extends Error {
   constructor(
@@ -41,7 +66,7 @@ async function callExisting<T>(url: string, init: RequestInit): Promise<T> {
 }
 
 /** Upload a local version. Creates the remote site on first share. Returns the updated site. */
-export async function shareVersion(original: LocalSite, version: LocalVersion): Promise<LocalSite> {
+export async function shareVersion(original: LocalSite, version: LocalVersion, slug?: string): Promise<LocalSite> {
   const site = structuredClone(original);
   const zip = zipSync(await readVersionFiles(version), { level: 6 });
   if (zip.byteLength > MAX_ZIP) throw new Error("This version is over 4MB zipped, too large to share.");
@@ -66,11 +91,12 @@ export async function shareVersion(original: LocalSite, version: LocalVersion): 
     }
   }
   form.append("name", site.name);
+  if (slug) form.append("slug", slug);
   const r = await call<{ site: RemoteSite; edit_token: string; url: string }>("/api/sites", {
     method: "POST",
     body: form,
   });
-  site.remote = { siteId: r.site.id, token: r.edit_token, url: r.url, live: r.site.live, pushed: {} };
+  site.remote = { siteId: r.site.id, slug: r.site.slug, token: r.edit_token, url: r.url, live: r.site.live, pushed: {} };
   site.remote.pushed[version.n] = r.site.live!;
   return site;
 }
@@ -84,6 +110,20 @@ export async function setRemoteLive(original: LocalSite, remoteN: number): Promi
     body: JSON.stringify({ version: remoteN }),
   });
   site.remote.live = r.site.live;
+  return site;
+}
+
+/** Give the shared site a new link name. Its earlier links keep working and forward to the new one. */
+export async function setSlug(original: LocalSite, slug: string): Promise<LocalSite> {
+  const site = structuredClone(original);
+  if (!site.remote) return site;
+  const r = await callExisting<{ site: RemoteSite; url: string }>(`/api/sites/${site.remote.siteId}/slug`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${site.remote.token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ slug }),
+  });
+  site.remote.url = r.url;
+  site.remote.slug = r.site.slug;
   return site;
 }
 

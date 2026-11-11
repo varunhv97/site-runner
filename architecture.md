@@ -40,7 +40,8 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
 
 ## Data (server)
 - **Database** (`_core/db.py`): `sites` (owner, token hash, live version, deleted_at), `versions`,
-  `version_files` (site, version, path → sha256), `users`, `uploads` (per user per day).
+  `version_files` (site, version, path → sha256), `slugs` (link names, never deleted; newest = current),
+  `users`, `uploads` (per user per day). `/s/<ref>` resolves a random id first, then a link name; old names 308 to the current one.
   Publishing is one transaction with the site row locked (`FOR UPDATE`); serving a file is one indexed lookup.
   Schema is created on first use (`create_all`); add migrations (Alembic) before changing columns.
 - **Blob** (`_core/storage.py`): only `blobs/<sha256>` file contents. Private store (`BLOB_ACCESS`); the token is

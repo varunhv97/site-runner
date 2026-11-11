@@ -7,8 +7,12 @@ import { useDialog } from "./AppDialog";
 import {
   fetchMe,
   pinnedUrl,
+  checkSlug,
+  normalizeSlug,
   rotateToken,
   setRemoteLive,
+  setSlug,
+  slugify,
   shareVersion,
   signInUrl,
   signOut,
@@ -269,6 +273,33 @@ export default function Home() {
               {site.remote && (
                 <div className="share">
                   <span className="share-label">Live link · version {site.remote.live}</span> <CopyLink url={site.remote.url} />
+                  <button
+                    className="small"
+                    disabled={!!busy}
+                    onClick={async () => {
+                      const remote = site.remote!;
+                      const slug = await ask({
+                        title: "Change link name",
+                        message: "The current link keeps working and forwards to the new one.",
+                        input: {
+                          label: "Link name",
+                          prefix: `${location.host}/s/`,
+                          defaultValue: remote.slug ?? slugify(site.name),
+                          normalize: normalizeSlug,
+                          required: true,
+                          validate: (value) => checkSlug(value, remote.slug),
+                        },
+                        confirmLabel: "Save name",
+                      });
+                      if (!slug || slug === remote.slug) return;
+                      await run("Renaming…", async () => {
+                        await saveSite(await setSlug(site, slug));
+                        await refresh();
+                      });
+                    }}
+                  >
+                    Change link name
+                  </button>
                   <details>
                     <summary className="muted">Edit token</summary>
                     <code>{site.remote.token}</code>
@@ -336,12 +367,29 @@ export default function Home() {
                             <button
                               className="small primary"
                               disabled={!!busy}
-                              onClick={() =>
-                                run("Uploading…", async () => {
-                                  await saveSite(await shareVersion(site, v));
+                              onClick={async () => {
+                                let slug: string | undefined;
+                                if (!site.remote) {
+                                  const picked = await ask({
+                                    title: `Share “${site.name}”`,
+                                    message: "Pick a link name, or leave it blank for a random link. Names are unique and can't be reused.",
+                                    input: {
+                                      label: "Link name",
+                                      prefix: `${location.host}/s/`,
+                                      defaultValue: slugify(site.name),
+                                      normalize: normalizeSlug,
+                                      validate: (value) => checkSlug(value),
+                                    },
+                                    confirmLabel: "Share",
+                                  });
+                                  if (picked === null) return;
+                                  slug = picked || undefined;
+                                }
+                                await run("Uploading…", async () => {
+                                  await saveSite(await shareVersion(site, v, slug));
                                   await refresh();
-                                })
-                              }
+                                });
+                              }}
                             >
                               {site.remote ? "Publish" : "Share"}
                             </button>

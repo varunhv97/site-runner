@@ -11,7 +11,18 @@ export type DialogOptions = {
   confirmLabel: string;
   danger?: boolean;
   /** Ask for text: the dialog resolves with what was typed. */
-  input?: { label: string; defaultValue?: string; placeholder?: string; required?: boolean };
+  input?: {
+    label: string;
+    defaultValue?: string;
+    placeholder?: string;
+    required?: boolean;
+    /** Shown in front of the field, e.g. the start of a link. */
+    prefix?: string;
+    /** Turns what is typed into the stored value (e.g. lower-case a link name). */
+    normalize?: (value: string) => string;
+    /** Checked as you type (debounced) and before confirming: an error message, or null when fine. */
+    validate?: (value: string) => Promise<string | null>;
+  };
 };
 
 type Open = DialogOptions & { resolve: (value: string | null) => void };
@@ -33,14 +44,39 @@ export function useDialog() {
 
 function AppDialog({ options, onDone }: { options: DialogOptions; onDone: (value: string | null) => void }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [value, setValue] = useState(options.input?.defaultValue ?? "");
+  const input = options.input;
+  const [value, setValue] = useState(input?.defaultValue ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const check = useRef(0);
 
   useEffect(() => {
     const el = ref.current;
     if (el && !el.open) el.showModal();
   }, []);
 
-  const blocked = !!options.input?.required && !value.trim();
+  // live check while typing, a moment after the last keystroke; stale answers are ignored
+  useEffect(() => {
+    if (!input?.validate) return;
+    const id = ++check.current;
+    const timer = setTimeout(async () => {
+      const problem = await input.validate!(value.trim());
+      if (id === check.current) setError(problem);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [value, input]);
+
+  const blocked = (!!input?.required && !value.trim()) || !!error || checking;
+
+  async function confirm() {
+    if (input?.validate) {
+      setChecking(true);
+      const problem = await input.validate(value.trim());
+      setChecking(false);
+      if (problem) return setError(problem);
+    }
+    onDone(input ? value.trim() : "");
+  }
 
   return (
     <dialog
@@ -59,22 +95,30 @@ function AppDialog({ options, onDone }: { options: DialogOptions; onDone: (value
         method="dialog"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!blocked) onDone(options.input ? value.trim() : "");
+          if (!blocked) confirm();
         }}
       >
         <h2 id="app-dialog-title">{options.title}</h2>
         {options.message && <p className="app-dialog__message">{options.message}</p>}
-        {options.input && (
+        {input && (
           <label className="app-dialog__field">
-            <span>{options.input.label}</span>
-            <input
-              autoFocus
-              value={value}
-              placeholder={options.input.placeholder}
-              maxLength={100}
-              onChange={(e) => setValue(e.target.value)}
-              onFocus={(e) => e.target.select()} // typing replaces the suggested name
-            />
+            <span>{input.label}</span>
+            <span className={`app-dialog__control${error ? " has-error" : ""}`}>
+              {input.prefix && <span className="app-dialog__prefix">{input.prefix}</span>}
+              <input
+                autoFocus
+                value={value}
+                placeholder={input.placeholder}
+                maxLength={100}
+                aria-invalid={!!error}
+                aria-describedby="app-dialog-error"
+                onChange={(e) => setValue(input.normalize ? input.normalize(e.target.value) : e.target.value)}
+                onFocus={(e) => e.target.select()} // typing replaces the suggestion
+              />
+            </span>
+            <span id="app-dialog-error" className="app-dialog__error" role="status">
+              {error ?? ""}
+            </span>
           </label>
         )}
         <div className="app-dialog__actions">

@@ -17,6 +17,8 @@
 
 - [x] Metadata in Postgres (SQLite locally), files in a private Blob store (OIDC), daily cleanup cron; verified against real Neon + Blob and live on spinsite
 
+- [x] In-app dialogs instead of browser prompt/confirm; custom link names (/s/<name>/), unique, never reused
+
 ## Next
 - [ ] Delete the old public store `site-runner-blob` in the dashboard (CLI needs an interactive confirm)
 - [ ] Disconnect Development from site-runner-db and site-runner-private (local dev uses SQLite + .data)
