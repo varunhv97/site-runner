@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fromDataTransfer, fromFileList, type FileMap } from "@/lib/ingest";
 import { addVersion, deleteSite, listSites, saveSite, type LocalSite } from "@/lib/localStore";
+import { useDialog } from "./AppDialog";
 import {
   fetchMe,
   pinnedUrl,
@@ -98,6 +99,7 @@ export default function Home() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [me, setMe] = useState<Me>({ enabled: false, user: null });
+  const { ask, dialog } = useDialog();
 
   const site = sites.find((s) => s.id === selectedId) ?? null;
 
@@ -133,22 +135,36 @@ export default function Home() {
     }
   }
 
-  const onNewSite = (files: FileMap) =>
-    run("Saving…", async () => {
-      const name = prompt("Name this site", "My site") || "My site";
+  const onNewSite = async (files: FileMap) => {
+    const name = await ask({
+      title: "Name this site",
+      message: `${Object.keys(files).length} file${Object.keys(files).length === 1 ? "" : "s"} ready to save in this browser.`,
+      input: { label: "Site name", defaultValue: "My site", required: true },
+      confirmLabel: "Save site",
+    });
+    if (name === null) return;
+    await run("Saving…", async () => {
       const s = await addVersion(files, null, name);
       setPreviewN(1);
       await refresh(s.id);
     });
+  };
 
-  const onNewVersion = (files: FileMap) =>
-    run("Saving version…", async () => {
-      if (!site) return;
-      const note = prompt("What changed? (optional)") ?? "";
+  const onNewVersion = async (files: FileMap) => {
+    if (!site) return;
+    const note = await ask({
+      title: `Save version ${site.versions.length + 1} of ${site.name}`,
+      message: "A short note shows next to the version in the list.",
+      input: { label: "What changed (optional)", placeholder: "New header and footer" },
+      confirmLabel: "Save version",
+    });
+    if (note === null) return;
+    await run("Saving version…", async () => {
       const s = await addVersion(files, site, site.name, note);
       setPreviewN(s.versions.length);
       await refresh(s.id);
     });
+  };
 
   const latest = site?.versions[site.versions.length - 1];
   const shownN = site ? (previewN && previewN <= site.versions.length ? previewN : latest!.n) : null;
@@ -230,8 +246,15 @@ export default function Home() {
                 />
                 <button
                   className="danger small"
-                  onClick={() =>
-                    confirm(`Delete "${site.name}" from this browser? Shared links keep working.`) &&
+                  onClick={async () =>
+                    (await ask({
+                      title: `Delete “${site.name}” from this browser?`,
+                      message: site.remote
+                        ? "All its local versions are removed. The shared link keeps working until you unpublish it."
+                        : "All its versions are removed from this browser. This can't be undone.",
+                      confirmLabel: "Delete",
+                      danger: true,
+                    })) !== null &&
                     run("Deleting…", async () => {
                       await deleteSite(site.id);
                       setSelectedId(null);
@@ -266,8 +289,13 @@ export default function Home() {
                   <button
                     className="small danger unpublish"
                     disabled={!!busy}
-                    onClick={() =>
-                      confirm("Unpublish this site? Its links stop working for everyone. Your local versions stay.") &&
+                    onClick={async () =>
+                      (await ask({
+                        title: "Unpublish this site?",
+                        message: "Its live and pinned links stop working for everyone. Your local versions stay in this browser.",
+                        confirmLabel: "Unpublish",
+                        danger: true,
+                      })) !== null &&
                       run("Unpublishing…", async () => {
                         await saveSite(await unpublish(site));
                         await refresh();
@@ -360,6 +388,7 @@ export default function Home() {
           )}
         </section>
       </div>
+      {dialog}
     </main>
   );
 }

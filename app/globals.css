@@ -125,3 +125,30 @@ aside, section { min-width: 0; }
 .btn-link.small { min-height: 32px; padding: 0 14px; font-size: 14px; }
 .share details button { margin-top: 10px; }
 .unpublish { margin-top: 12px; }
+
+/* In-app dialogs (app/app/AppDialog.tsx) */
+.app-dialog {
+  width: min(440px, calc(100vw - 32px)); padding: 0; margin: auto;
+  color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+.app-dialog::backdrop { background: rgba(6, 14, 7, 0.72); }
+.app-dialog[open] { animation: dialog-in 180ms cubic-bezier(.22, 1, .36, 1); }
+.app-dialog[open]::backdrop { animation: backdrop-in 180ms ease-out; }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+@keyframes backdrop-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .app-dialog[open], .app-dialog[open]::backdrop { animation: none; } }
+.app-dialog form { display: grid; gap: 16px; padding: 24px; }
+.app-dialog h2 { margin: 0; font-size: 22px; line-height: 1.25; text-wrap: balance; }
+.app-dialog__message { margin: -4px 0 0; color: var(--muted); font-size: 15px; }
+.app-dialog__field { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+.app-dialog__field input {
+  font: 400 16px/1.4 var(--font-text), sans-serif; color: var(--ink);
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-md);
+  min-height: 44px; padding: 0 12px;
+}
+.app-dialog__field input::placeholder { color: rgba(154, 163, 154, 0.7); }
+.app-dialog__field input:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.app-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+button.danger-solid { background: var(--danger); color: #2a0d08; border-color: var(--danger); }
