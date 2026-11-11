@@ -48,5 +48,7 @@ def test_change_the_start_page_of_a_shared_version(client):
 
 def test_a_pinned_start_page_is_not_cached_for_long(client):
     sid = share(client).json()["site"]["id"]
-    assert client.get(f"/r/{sid}@1/").headers["cache-control"] == "no-cache"  # the owner can change it
-    assert "max-age=3600" in client.get(f"/r/{sid}@1/home.html").headers["cache-control"]
+    host = {"Host": f"{sid}.sites.spinsite.app"}
+    assert client.get("/@1/", headers=host).headers["cache-control"] == "no-cache"  # the owner can change it
+    assert "max-age=3600" in client.get("/@1/home.html", headers=host).headers["cache-control"]
+    assert client.get("/home.html", headers=host).headers["cache-control"] == "no-cache"  # live: always revalidate

@@ -124,7 +124,22 @@ def extract_zip(data: bytes) -> dict[str, bytes]:
     if len(tops) == 1 and all("/" in p for p in files):
         prefix = tops.pop() + "/"
         files = {p[len(prefix) :]: b for p, b in files.items()}
+    check_reserved_names(files)
     return files
+
+
+_PINNED_NAME = re.compile(r"@\d+", re.ASCII)
+
+
+def check_reserved_names(paths) -> None:
+    """A top-level "@3" would be hidden behind the pinned-version links (/@3/ opens version 3)."""
+    for path in paths:
+        top = path.split("/", 1)[0]
+        if _PINNED_NAME.fullmatch(top):
+            raise SiteError(
+                f'Rename "{top}": a top-level folder or file can\'t be named @ and a number, '
+                "because links like /@3/ open version 3 of a shared site."
+            )
 
 
 def pick_entry(paths) -> str:
@@ -342,12 +357,13 @@ class Sites:
     async def list_user_sites(self, sub: str) -> list[str]:
         return [s["id"] for s in await self.user_sites(sub)]
 
-    async def resolve(self, ref: str, n: int | None) -> dict:
+    async def resolve(self, ref: str, n: int | None, slugs: bool = True) -> dict:
         """The version to serve for a random id or link name: version n, or the live one. 404 when none.
-        "current_slug" lets the caller redirect an old link name to the site's current one."""
+        "current_slug" lets the caller redirect an old link name to the site's current one.
+        slugs=False: ref must be the site's id (content hosts are named by id only)."""
         await self._ready()
         async with self.engine.connect() as conn:
-            site_id, via_slug = await self._site_id_for(conn, ref)
+            site_id, via_slug = await self._site_id_for(conn, ref) if slugs else (ref, None)
             site = await self._site(conn, site_id)
             n = site.live if n is None else n
             q = select(versions).where(versions.c.site_id == site_id, versions.c.n == n)

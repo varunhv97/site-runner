@@ -1,0 +1,45 @@
+{
+  "about": "Path resolution cases for a site's files. Used by tests/test_content.py (server) and tests/path_rules.test.mjs (preview service worker). path is relative to the site's base (/ or /@<n>/), already URL-decoded.",
+  "sites": [
+    {
+      "entry": "index.html",
+      "files": ["index.html", "about.html", "css/a.css", "docs/index.html", "docs/intro.html", "a b/index.html", "@home.html"],
+      "cases": [
+        { "path": "", "file": "index.html" },
+        { "path": "index.html", "file": "index.html" },
+        { "path": "about.html", "file": "about.html" },
+        { "path": "css/a.css", "file": "css/a.css" },
+        { "path": "css/", "missing": true },
+        { "path": "css", "missing": true },
+        { "path": "docs", "redirect": "docs/", "status": 308 },
+        { "path": "docs/", "file": "docs/index.html" },
+        { "path": "docs/intro.html", "file": "docs/intro.html" },
+        { "path": "a b", "redirect": "a b/", "status": 308 },
+        { "path": "a b/", "file": "a b/index.html" },
+        { "path": "@home.html", "file": "@home.html" },
+        { "path": "nope.html", "missing": true },
+        { "path": "docs/nope/", "missing": true },
+        { "path": "Index.html", "missing": true }
+      ]
+    },
+    {
+      "entry": "pages/home.html",
+      "files": ["pages/home.html", "pages/other.html", "readme.txt"],
+      "cases": [
+        { "path": "", "redirect": "pages/home.html", "status": 307 },
+        { "path": "pages", "missing": true },
+        { "path": "pages/", "missing": true },
+        { "path": "pages/home.html", "file": "pages/home.html" },
+        { "path": "readme.txt", "file": "readme.txt" }
+      ]
+    },
+    {
+      "entry": "start.html",
+      "files": ["start.html", "index.html"],
+      "cases": [
+        { "path": "", "file": "start.html" },
+        { "path": "index.html", "file": "index.html" }
+      ]
+    }
+  ]
+}
