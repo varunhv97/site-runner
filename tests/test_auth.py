@@ -153,3 +153,49 @@ def test_limits(client, monkeypatch):
     assert client.post(f"/api/sites/{sid}/versions", files=v).status_code == 429  # versions cap
     assert share(client).status_code == 200  # second site, third upload
     assert share(client).status_code == 429  # sites cap
+
+
+def share_named(client, slug, text="v1"):
+    return client.post("/api/sites", files={"file": ("s.zip", make_zip({"index.html": text}))}, data={"slug": slug})
+
+
+def test_link_names_are_unique_across_users(client, monkeypatch):
+    sign_in(client, monkeypatch, ALICE)
+    r = share_named(client, "learn-sql")
+    assert r.status_code == 200 and r.json()["url"] == f"{BASE}/s/learn-sql/"
+    sid = r.json()["site"]["id"]
+    assert client.get("/s/learn-sql/").text == "v1"
+    assert client.get(f"/s/{sid}/").text == "v1"  # the random id keeps working
+    assert client.get("/api/slugs/learn-sql").json() == {"available": False, "reason": "That name is taken."}
+
+    sign_in(client, monkeypatch, BOB)
+    assert share_named(client, "learn-sql").status_code == 409
+    assert share_named(client, "Learn-SQL").status_code == 409  # names are lower-cased
+    for bad, status in [("api", 400), ("ab", 400), ("-x-", 400), ("a--b", 400), ("has space", 400)]:
+        assert share_named(client, bad).status_code == status, bad
+    assert client.get("/api/slugs/api").json()["available"] is False
+
+
+def test_rename_keeps_old_links_and_never_frees_names(client, monkeypatch):
+    sign_in(client, monkeypatch, ALICE)
+    sid = share_named(client, "trail-map").json()["site"]["id"]
+    client.post(f"/api/sites/{sid}/versions", files={"file": ("s.zip", make_zip({"index.html": "v2"}))})
+    r = client.post(f"/api/sites/{sid}/slug", json={"slug": "ridge-loop"})
+    assert r.status_code == 200 and r.json()["url"] == f"{BASE}/s/ridge-loop/"
+    assert client.get("/s/ridge-loop/").text == "v2"
+    old = client.get("/s/trail-map@1/index.html", follow_redirects=False)
+    assert old.status_code == 308 and old.headers["location"] == "/s/ridge-loop@1/index.html"
+    assert client.get("/s/trail-map@1/").text == "v1"  # following the redirect, pinned version kept
+
+    client.delete(f"/api/sites/{sid}")
+    sign_in(client, monkeypatch, BOB)
+    assert share_named(client, "ridge-loop").status_code == 409  # unpublished names stay reserved
+    assert share_named(client, "trail-map").status_code == 409
+
+
+def test_link_names_cannot_shadow_ids(client, monkeypatch):
+    sign_in(client, monkeypatch, ALICE)
+    sid = share(client).json()["site"]["id"]
+    sign_in(client, monkeypatch, BOB)
+    assert share_named(client, sid).status_code == 409  # someone's random id is not a free name
+    assert client.get(f"/s/{sid}/").text == "v1"

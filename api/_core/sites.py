@@ -6,6 +6,7 @@ import io
 import mimetypes
 import os
 import posixpath
+import re
 import secrets
 import string
 import time
@@ -15,7 +16,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import IntegrityError
 
-from .db import create_schema, sites, uploads, users, version_files, versions
+from .db import create_schema, sites, slugs, uploads, users, version_files, versions
 
 MAX_ZIP_BYTES = 4 * 1024 * 1024  # Vercel function body limit is 4.5MB
 MAX_TOTAL_BYTES = 50 * 1024 * 1024  # zip-bomb guard (uncompressed)
@@ -115,6 +116,49 @@ def _new_id() -> str:
     return "".join(secrets.choice(_ID_ALPHABET) for _ in range(10))
 
 
+SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$")
+RESERVED_SLUGS = {
+    "api",
+    "app",
+    "s",
+    "admin",
+    "login",
+    "logout",
+    "signin",
+    "signup",
+    "auth",
+    "assets",
+    "static",
+    "www",
+    "help",
+    "about",
+    "settings",
+    "account",
+    "new",
+    "preview",
+    "share",
+    "docs",
+    "terms",
+    "privacy",
+    "support",
+    "spinsite",
+    "site-runner",
+    "siterunner",
+    "vercel",
+}
+
+
+def slug_problem(slug: str) -> str | None:
+    """Why a link name can't be used (format and reserved words), or None."""
+    if not SLUG_RE.match(slug):
+        return "Use 3 to 40 lowercase letters, numbers or hyphens, starting and ending with a letter or number."
+    if "--" in slug:
+        return "Use single hyphens only."
+    if slug in RESERVED_SLUGS:
+        return "That name is reserved."
+    return None
+
+
 def is_admin(user: dict | None) -> bool:
     admins = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
     return bool(user and user.get("email", "").lower() in admins)
@@ -159,6 +203,47 @@ class Sites:
 
     # ---- reading ----
 
+    async def _site_id_for(self, conn, ref: str) -> tuple[str, str | None]:
+        """(site id, the slug it was reached by or None) for a random id or a link name. 404 when unknown."""
+        if ref.isalnum() and (await conn.execute(select(sites.c.id).where(sites.c.id == ref))).first():
+            return ref, None
+        row = (await conn.execute(select(slugs.c.site_id).where(slugs.c.slug == ref))).first()
+        if row is None:
+            raise SiteError("site not found", 404)
+        return row.site_id, ref
+
+    async def _current_slug(self, conn, site_id: str) -> str | None:
+        q = select(slugs.c.slug).where(slugs.c.site_id == site_id).order_by(slugs.c.created_at.desc(), slugs.c.slug)
+        return (await conn.execute(q.limit(1))).scalar()
+
+    async def _name_used(self, conn, name: str) -> bool:
+        """Ids and link names share the /s/ namespace, so each must be unused as either."""
+        if (await conn.execute(select(slugs.c.slug).where(slugs.c.slug == name))).first():
+            return True
+        return bool((await conn.execute(select(sites.c.id).where(sites.c.id == name))).first())
+
+    async def slug_available(self, slug: str) -> tuple[bool, str | None]:
+        problem = slug_problem(slug)
+        if problem:
+            return False, problem
+        await self._ready()
+        async with self.engine.connect() as conn:
+            return (False, "That name is taken.") if await self._name_used(conn, slug) else (True, None)
+
+    async def _claim_slug(self, conn, site_id: str, slug: str) -> None:
+        problem = slug_problem(slug)
+        if problem:
+            raise SiteError(problem, 400)
+        if (await conn.execute(select(sites.c.id).where(sites.c.id == slug))).first():
+            raise SiteError("That name is taken.", 409)
+        newest = (await conn.execute(select(func.max(slugs.c.created_at)).where(slugs.c.site_id == site_id))).scalar()
+        stamp = max(int(time.time()), (newest or 0) + 1)  # strictly newest, even for two renames in one second
+        try:
+            async with conn.begin_nested():  # a savepoint, so a taken name fails cleanly inside the transaction
+                await conn.execute(slugs.insert().values(slug=slug, site_id=site_id, created_at=stamp))
+        except IntegrityError as e:
+            raise SiteError("That name is taken.", 409) from e
+
     async def _site(self, conn, site_id: str, lock: bool = False):
         if not site_id.isalnum():
             raise SiteError("site not found", 404)
@@ -177,6 +262,7 @@ class Sites:
         rows = (await conn.execute(select(versions).where(versions.c.site_id == site_id).order_by(versions.c.n))).all()
         return {
             "id": site.id,
+            "slug": await self._current_slug(conn, site_id),
             "name": site.name,
             "live": site.live,
             "versions": [
@@ -207,16 +293,20 @@ class Sites:
     async def list_user_sites(self, sub: str) -> list[str]:
         return [s["id"] for s in await self.user_sites(sub)]
 
-    async def resolve(self, site_id: str, n: int | None) -> dict:
-        """The version to serve: version n, or the live one. 404 when there is none."""
+    async def resolve(self, ref: str, n: int | None) -> dict:
+        """The version to serve for a random id or link name: version n, or the live one. 404 when none.
+        "current_slug" lets the caller redirect an old link name to the site's current one."""
         await self._ready()
         async with self.engine.connect() as conn:
+            site_id, via_slug = await self._site_id_for(conn, ref)
             site = await self._site(conn, site_id)
             n = site.live if n is None else n
-            row = (await conn.execute(select(versions).where(versions.c.site_id == site_id, versions.c.n == n))).first()
+            q = select(versions).where(versions.c.site_id == site_id, versions.c.n == n)
+            row = (await conn.execute(q)).first()
+            current = await self._current_slug(conn, site_id) if via_slug else None
         if row is None:
             raise SiteError("version not found", 404)
-        return {"n": row.n, "entry": row.entry}
+        return {"site_id": site_id, "n": row.n, "entry": row.entry, "via_slug": via_slug, "current_slug": current}
 
     async def file_digest(self, site_id: str, n: int, path: str) -> str | None:
         async with self.engine.connect() as conn:
@@ -270,11 +360,15 @@ class Sites:
         await conn.execute(update(sites).where(sites.c.id == site_id).values(live=n))
         return n
 
-    async def create(self, name: str, zip_bytes: bytes, note: str = "", owner: dict | None = None) -> tuple[dict, str]:
+    async def create(
+        self, name: str, zip_bytes: bytes, note: str = "", owner: dict | None = None, slug: str | None = None
+    ) -> tuple[dict, str]:
         await self._ready()
+        if slug and slug_problem(slug):
+            raise SiteError(slug_problem(slug), 400)
         manifest, entry, size = await self._upload_files(zip_bytes)
         token = secrets.token_urlsafe(24)
-        site_id = _new_id()
+        site_id = await self._unused_id()
         async with self.engine.begin() as conn:
             if owner:
                 count = (
@@ -295,9 +389,33 @@ class Sites:
                     deleted_by_admin=False,
                 )
             )
+            if slug:
+                await self._claim_slug(conn, site_id, slug)
             await self._add_version(conn, site_id, manifest, entry, size, note)
             meta = await self.public_meta(site_id, conn)
         return meta, token
+
+    async def _unused_id(self) -> str:
+        async with self.engine.connect() as conn:
+            while True:
+                candidate = _new_id()
+                if not await self._name_used(conn, candidate):
+                    return candidate
+
+    async def set_slug(self, site_id: str, token: str | None, slug: str, user: dict | None = None) -> dict:
+        """Give a site a (new) link name. Its earlier names keep pointing at it, so shared links never break."""
+        await self._ready()
+        async with self.engine.begin() as conn:
+            self.check_access(await self._site(conn, site_id, lock=True), token, user)
+            if await self._current_slug(conn, site_id) != slug:
+                owner = (await conn.execute(select(slugs.c.site_id).where(slugs.c.slug == slug))).first()
+                if owner and owner.site_id == site_id:  # switching back to one of this site's earlier names
+                    newest = select(func.max(slugs.c.created_at)).where(slugs.c.site_id == site_id)
+                    stamp = (await conn.execute(newest)).scalar_one() + 1
+                    await conn.execute(update(slugs).where(slugs.c.slug == slug).values(created_at=stamp))
+                else:
+                    await self._claim_slug(conn, site_id, slug)
+            return await self.public_meta(site_id, conn)
 
     async def add_version(
         self, site_id: str, token: str | None, zip_bytes: bytes, note: str = "", user: dict | None = None

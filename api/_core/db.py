@@ -68,6 +68,18 @@ version_files = Table(
     Index("ix_version_files_digest", "digest"),
 )
 
+# Custom link names (/s/<slug>/), unique across all users. Rows are never deleted, so a name that was
+# ever used can't be taken over by someone else; a site's current name is its newest row.
+slugs = Table(
+    "slugs",
+    metadata,
+    Column("slug", String(40), primary_key=True),
+    Column("site_id", String(16), nullable=False),
+    Column("created_at", Integer, nullable=False),
+    ForeignKeyConstraint(["site_id"], ["sites.id"], ondelete="CASCADE"),
+    Index("ix_slugs_site", "site_id"),
+)
+
 uploads = Table(
     "uploads",
     metadata,

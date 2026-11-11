@@ -76,8 +76,13 @@ def _base_url(request: Request) -> str:
     return base.rstrip("/")
 
 
-def _share_url(request: Request, site_id: str, version: int | None = None) -> str:
-    return f"{_base_url(request)}/s/{site_id}{f'@{version}' if version else ''}/"
+def _share_url(request: Request, ref: str, version: int | None = None) -> str:
+    """ref: the site's link name when it has one, else its random id."""
+    return f"{_base_url(request)}/s/{ref}{f'@{version}' if version else ''}/"
+
+
+def _ref(meta: dict) -> str:
+    return meta.get("slug") or meta["id"]
 
 
 def _current_user(request: Request) -> dict | None:
@@ -175,7 +180,7 @@ async def my_sites(request: Request):
     user = _current_user(request)
     if not user:
         raise SiteError("sign in to list your sites", 401)
-    return {"sites": [meta | {"url": _share_url(request, meta["id"])} for meta in await sites.user_sites(user["sub"])]}
+    return {"sites": [meta | {"url": _share_url(request, _ref(meta))} for meta in await sites.user_sites(user["sub"])]}
 
 
 # ---- Sites ----
@@ -187,6 +192,7 @@ async def create_site(
     file: UploadFile = File(...),
     name: str = Form(""),
     note: str = Form(""),
+    slug: str = Form(""),
 ):
     _check_origin(request)
     user = _current_user(request)
@@ -195,12 +201,12 @@ async def create_site(
     if not auth.enabled() and os.environ.get("VERCEL_ENV") == "production":
         # no anonymous public hosting: production shares only once Google sign-in is configured
         raise SiteError("Sharing opens once Google sign-in is set up on this site", 503)
-    meta, token = await sites.create(name, await file.read(), note, owner=user)
+    meta, token = await sites.create(name, await file.read(), note, owner=user, slug=slug.strip().lower() or None)
     return {
         "site": meta,
         "edit_token": token,
-        "url": _share_url(request, meta["id"]),
-        "version_url": _share_url(request, meta["id"], meta["live"]),
+        "url": _share_url(request, _ref(meta)),
+        "version_url": _share_url(request, _ref(meta), meta["live"]),
     }
 
 
@@ -218,13 +224,32 @@ async def add_version(
     )
     return {
         "site": meta,
-        "url": _share_url(request, site_id),
-        "version_url": _share_url(request, site_id, meta["live"]),
+        "url": _share_url(request, _ref(meta)),
+        "version_url": _share_url(request, _ref(meta), meta["live"]),
     }
 
 
 class LiveBody(BaseModel):
     version: int
+
+
+class SlugBody(BaseModel):
+    slug: str
+
+
+@app.get("/api/slugs/{slug}")
+async def slug_available(slug: str):
+    """Is this link name free? For the share dialog's live check."""
+    available, reason = await sites.slug_available(slug.strip().lower())
+    return {"available": available, "reason": reason}
+
+
+@app.post("/api/sites/{site_id}/slug")
+async def set_slug(request: Request, site_id: str, body: SlugBody, authorization: str | None = Header(None)):
+    """Give a site a link name (/s/<slug>/). Earlier names keep working and forward to the new one."""
+    _check_origin(request)
+    meta = await sites.set_slug(site_id, _bearer(authorization), body.slug.strip().lower(), _current_user(request))
+    return {"site": meta, "url": _share_url(request, _ref(meta))}
 
 
 @app.post("/api/sites/{site_id}/live")
@@ -303,6 +328,11 @@ async def serve(ref: str, path: str):
         version = await sites.resolve(site_id, n)
     except SiteError:
         return _not_found()
+    if version["via_slug"] and version["current_slug"] != version["via_slug"]:
+        # an earlier link name of a renamed site: forward to the current one, keeping the version and path
+        target = version["current_slug"] + (f"@{vstr}" if pinned else "")
+        return RedirectResponse(f"/s/{target}/{path}", status_code=308)
+    site_id = version["site_id"]
 
     base = f"/s/{ref}/"
     if path == "":
