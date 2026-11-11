@@ -177,3 +177,27 @@ aside, section { min-width: 0; }
 .app-dialog__error { min-height: 20px; color: var(--danger); font-size: 14px; }
 .app-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
 button.danger-solid { background: var(--danger); color: #2a0d08; border-color: var(--danger); }
+
+/* Report and admin pages (app/report, app/admin) */
+main.narrow { max-width: 680px; }
+.lead { margin-top: -4px; }
+.small-print { font-size: 14px; margin-top: 24px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 24px; }
+.panel h2 { margin: 0 0 8px; font-size: 22px; }
+.form { display: grid; gap: 18px; }
+.field { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+.field input, .field select, .field textarea {
+  font: 400 16px/1.4 var(--font-text), sans-serif; color: var(--ink);
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-md);
+  min-height: 44px; padding: 10px 12px; width: 100%;
+}
+.field textarea { resize: vertical; }
+.field select option { background: var(--bg); color: var(--ink); }
+.field input:focus-visible, .field select:focus-visible, .field textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.form-error { margin: 0; color: var(--danger); font-size: 14px; }
+.report-link { font-size: 14px; color: var(--muted); }
+.reports { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 12px; }
+.reports li { display: grid; gap: 8px; }
+.reports .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 14px; }
+.reports .details { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.reports .row { justify-content: flex-start; }

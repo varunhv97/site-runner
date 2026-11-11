@@ -241,6 +241,9 @@ export default function Home() {
         </a>
         <div className="account">
           <p className="muted">Files stay in this browser until you share a version.</p>
+          <a className="report-link" href="/report">
+            Report abuse
+          </a>
           {me.enabled &&
             (me.user ? (
               <>
