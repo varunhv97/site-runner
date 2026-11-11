@@ -2,7 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fromDataTransfer, fromFileList, htmlFiles, needsStartPage, pickEntry, type FileMap } from "@/lib/ingest";
-import { addVersion, deleteSite, listSites, saveSite, setVersionEntry, type LocalSite } from "@/lib/localStore";
+import {
+  addVersion,
+  deleteSite,
+  listSites,
+  readVersionFiles,
+  saveSite,
+  setVersionEntry,
+  type LocalSite,
+  type LocalVersion,
+} from "@/lib/localStore";
+import { executableMessage, findExecutable } from "@/lib/executables";
+import { describe as describeSecret, scanFiles } from "@/lib/secrets";
 import { useDialog } from "./AppDialog";
 import {
   deleteRemoteVersion,
@@ -12,6 +23,7 @@ import {
   fetchUsage,
   pinnedUrl,
   checkSlug,
+  refreshHold,
   normalizeSlug,
   rotateToken,
   setRemoteEntry,
@@ -116,6 +128,7 @@ export default function Home() {
   const [previewN, setPreviewN] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [me, setMe] = useState<Me>({ enabled: false, user: null });
   const [usage, setUsage] = useState<Usage | null>(null);
   const [accountSites, setAccountSites] = useState<AccountSite[]>([]);
@@ -143,6 +156,16 @@ export default function Home() {
     });
   }, []);
 
+  // A held site may have been reviewed since: ask when it's opened.
+  useEffect(() => {
+    if (!site?.remote?.held) return;
+    refreshHold(site).then(async (updated) => {
+      if (updated === site) return;
+      await saveSite(updated);
+      setSites(await listSites());
+    });
+  }, [site]);
+
   const mustSignIn = me.enabled && !me.user;
   const refreshUsage = async () => {
     setUsage(await fetchUsage());
@@ -161,6 +184,32 @@ export default function Home() {
       setPreviewN(1);
       await refresh(s.id);
     });
+
+  // Executables can be previewed here but never shared: say so as soon as they're dropped.
+  const warnExecutables = (files: FileMap) => {
+    const bad = findExecutable(files);
+    setNotice(bad ? `${executableMessage(bad)}. The preview still works, but remove it before you share.` : null);
+  };
+
+  // Before files go public: refuse executables, and warn about anything that looks like a secret key.
+  const readyToShare = async (v: LocalVersion): Promise<boolean> => {
+    const files = await readVersionFiles(v);
+    const bad = findExecutable(files);
+    if (bad) {
+      setError(executableMessage(bad));
+      return false;
+    }
+    const secrets = scanFiles(files);
+    if (secrets.length === 0) return true;
+    const answer = await ask({
+      title: "These look like secret keys",
+      message: "Anyone with the link could see them. Remove them from the files, or share anyway.",
+      items: secrets.map(describeSecret),
+      confirmLabel: "Share anyway",
+      danger: true,
+    });
+    return answer !== null;
+  };
 
   async function run(label: string, fn: () => Promise<void>) {
     setBusy(label);
@@ -202,6 +251,7 @@ export default function Home() {
       const s = await addVersion(files, null, name, "", start);
       setPreviewN(1);
       await refresh(s.id);
+      warnExecutables(files);
     });
   };
 
@@ -226,6 +276,7 @@ export default function Home() {
       const s = await addVersion(files, site, site.name, note, start);
       setPreviewN(s.versions.length);
       await refresh(s.id);
+      warnExecutables(files);
     });
   };
 
@@ -267,6 +318,7 @@ export default function Home() {
       </header>
 
       {error && <div className="error">{error}</div>}
+      {notice && <div className="notice">{notice}</div>}
       {busy && <div className="busy">{busy}</div>}
 
       <div className="layout">
@@ -362,7 +414,16 @@ export default function Home() {
 
               {site.remote && (
                 <div className="share">
-                  <span className="share-label">Live link · version {site.remote.live}</span> <CopyLink url={site.remote.url} />
+                  {site.remote.held ? (
+                    <p className="held">
+                      Held for a safety review: {site.remote.held.map((r) => r.charAt(0).toLowerCase() + r.slice(1)).join("; ")}. It
+                      stays private until an admin approves it.
+                    </p>
+                  ) : (
+                    <>
+                      <span className="share-label">Live link · version {site.remote.live}</span> <CopyLink url={site.remote.url} />
+                    </>
+                  )}
                   <button
                     className="small"
                     disabled={!!busy}
@@ -488,6 +549,7 @@ export default function Home() {
                               className="small primary"
                               disabled={!!busy}
                               onClick={async () => {
+                                if (!(await readyToShare(v))) return;
                                 let slug: string | undefined;
                                 if (!site.remote) {
                                   const picked = await ask({

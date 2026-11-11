@@ -177,3 +177,8 @@ aside, section { min-width: 0; }
 .app-dialog__error { min-height: 20px; color: var(--danger); font-size: 14px; }
 .app-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
 button.danger-solid { background: var(--danger); color: #2a0d08; border-color: var(--danger); }
+
+/* upload checks: executables warning, held-for-review notice, lists in dialogs */
+.notice { padding: 12px 16px; border-radius: var(--r-md); margin-bottom: 16px; border: 1px solid var(--accent); color: var(--accent); }
+.share .held { margin: 0 0 8px; color: var(--danger); }
+.app-dialog__items { margin: -4px 0 0; padding-left: 18px; font: 13px/1.5 var(--font-mono), monospace; word-break: break-all; max-height: 40vh; overflow: auto; }

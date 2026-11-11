@@ -8,6 +8,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export type DialogOptions = {
   title: string;
   message?: string;
+  /** A list under the message, e.g. the files a warning is about. */
+  items?: string[];
   confirmLabel: string;
   danger?: boolean;
   /** Ask for text: the dialog resolves with what was typed. */
@@ -102,6 +104,13 @@ function AppDialog({ options, onDone }: { options: DialogOptions; onDone: (value
       >
         <h2 id="app-dialog-title">{options.title}</h2>
         {options.message && <p className="app-dialog__message">{options.message}</p>}
+        {options.items && options.items.length > 0 && (
+          <ul className="app-dialog__items">
+            {options.items.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        )}
         {input && (
           <label className="app-dialog__field">
             <span>{input.label}</span>
