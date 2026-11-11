@@ -1,7 +1,7 @@
 # API
 
 The app's own frontend uses this API, and scripts or other tools can too. Writes from a browser must come from
-the app's own origin. Scripts send no `Origin` header and authenticate with a site's **edit token**:
+the app's own origin exactly (shared sites and previews have their own origins and are refused). Scripts send no `Origin` header and authenticate with a site's **edit token**:
 `Authorization: Bearer <edit token>`. The site's owner can see and replace the token in `/app`.
 
 ## Sites
@@ -46,6 +46,7 @@ Admins are the `ADMIN_EMAILS` accounts (signed in).
 | Method | Path | Auth |
 | --- | --- | --- |
 | `GET` | `/api/auth/me` | none |
+| `GET` | `/api/config` → `{"content_scheme", "content_domain"}` (where previews and sites live) | none |
 | `GET` | `/api/me/sites` | signed in |
 | `GET` | `/api/me/usage` → `{"used_bytes", "quota_bytes"}` | signed in |
 
@@ -76,9 +77,13 @@ and sends its choice with every share.
 
 ## Shared sites
 
-- `/s/<name or id>/` follows the live version; `/s/<name>@<n>/` pins version n.
-- HTML pages under `/s/` are a small wrapper page that frames the sandboxed copy at `/r/...` and keeps the
-  site's `localStorage`. Other files are served as they are, with `Access-Control-Allow-Origin: *`.
+- Share links are `https://spinsite.app/s/<name or id>/` (live) and `/s/<name>@<n>/` (pinned version n). API
+  responses always return these; they don't depend on where content is hosted.
+- Every `/s/…` (and old `/r/…`) URL redirects (308, query kept) to the site's own origin:
+  `https://<site id>.sites.spinsite.app/` for the live version and `/@<n>/` for a pinned one, plus the same path.
+- Content there is served with a sandbox CSP that keeps the site's own origin (its own `localStorage`,
+  IndexedDB and cookies), `Origin-Agent-Cluster: ?1`, and `Access-Control-Allow-Origin: *` on non-HTML files.
+  Service workers are refused (403). The app's API and cookies don't exist on these hosts.
 
 ## Limits
 
@@ -88,6 +93,7 @@ and sends its choice with every share.
 - **Daily uploads:** edit-token uploads count too. They're charged to the site's owner, or to the site itself
   when it has no owner.
 - **Hidden files:** `.git`, `.env` and other dotfiles are dropped on upload.
+- **Reserved names:** a top-level folder or file named `@` plus digits (e.g. `@3/`) is refused: `/@3/` opens version 3.
 
 Errors come back as `{"error": "..."}` with a matching status: 401/403 for auth, 404, 409 (e.g. deleting the
 live version), 413 (too big or over quota), 429 (a limit reached, e.g. too many reports) and 451 on a

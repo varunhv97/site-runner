@@ -65,6 +65,7 @@ def test_user_content_urls(client, monkeypatch):
     sid = alice_site(client, monkeypatch, slug="trail-map")["site"]["id"]
     monkeypatch.delenv("USERCONTENT_BASE_DOMAIN", raising=False)
     assert report(client, f"https://{sid}.sites.spinsite.app/").status_code == 400
+    assert report(client, f"http://{sid}.usercontent.localhost:8001/").status_code == 200  # the local default
     monkeypatch.setenv("USERCONTENT_BASE_DOMAIN", "sites.spinsite.app")
     assert report(client, f"https://{sid}.sites.spinsite.app/a/b.html").status_code == 200
     assert report(client, "https://trail-map.sites.spinsite.app/").status_code == 200

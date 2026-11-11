@@ -14,8 +14,8 @@ ready you can share the one you pick.
   version you choose, and pinned links (`/s/my-site@3/`) that always show one version.
 - **Roll back in one click.** Point the live link at any earlier version. Visitors see it on their next load.
 - **Pick a link name.** `spinsite.app/s/my-site/` instead of a random id. Old names keep working after a rename.
-- **Sites that remember things.** Shared sites can use `localStorage`, so a course remembers your progress
-  or a game your high score, saved in each visitor's own browser.
+- **Sites that remember things.** Each shared site runs on its own address, so it can use `localStorage`,
+  IndexedDB and cookies: a course remembers your progress or a game your high score, in each visitor's browser.
 
 ## Examples
 
@@ -24,12 +24,14 @@ ready you can share the one you pick.
 
 ## Is it safe to open a shared site?
 
-Shared sites run in a locked-down sandbox: their scripts can't read your Site Runner account, cookies or edit
-tokens. What a site saves stays in your browser, kept apart from every other shared site.
+Shared sites and your own local previews never run on spinsite.app itself. Each one gets its own address under
+`sites.spinsite.app` (for example `abc123defg.sites.spinsite.app`), in a sandbox. Their scripts can't read your
+Site Runner account, session or edit tokens, and can't act for you. What a site saves stays in your browser,
+apart from other shared sites. Previews get your files straight from your browser; nothing is uploaded until you
+share. See [SECURITY.md](SECURITY.md) for the details and to report a problem.
 
 Shared sites are made by Site Runner's users. If one is phishing, malware, a scam or otherwise abusive,
-[report it](https://spinsite.app/report) and we'll take it down. To report a security problem in Site Runner
-itself, see [SECURITY.md](SECURITY.md).
+[report it](https://spinsite.app/report) and we'll take it down.
 
 ## Limits
 

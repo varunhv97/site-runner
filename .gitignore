@@ -47,3 +47,4 @@ __pycache__/
 shots/
 public/.taste-skill/
 !.env.example
+uc-static/

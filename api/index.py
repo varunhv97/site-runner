@@ -1,12 +1,16 @@
-"""FastAPI app: share API (/api/*) and shared-site serving (/s/<id>[@<version>]/...).
+"""FastAPI app: the share API (/api/*) on the app's host, and user content on the content hosts.
 
+HostRouter sends requests for hosts under USERCONTENT_BASE_DOMAIN to the content app (_core/content.py);
+every other host gets the app routes. /s/<ref>[@n]/<path> (and the old /r/) redirect to the content host.
 Runs as a Vercel Python function in prod; `uvicorn api.index:app --port 8000` in dev.
 """
 
 import hmac
 import logging
 import os
+import re
 import sys
+from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -15,35 +19,69 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response  # noqa: 
 from pydantic import BaseModel  # noqa: E402
 from sqlalchemy.exc import OperationalError  # noqa: E402
 
-from _core import abuse, auth  # noqa: E402
-from _core.frames import FRAME_VERSION, frame_page, wrapper_page  # noqa: E402
+from _core import abuse, auth, hosts  # noqa: E402
+from _core.content import CONTENT_HEADERS, held, make_content_app, not_found  # noqa: E402
 from _core.db import make_engine  # noqa: E402
-from _core.sites import SiteError, Sites, content_type, is_admin  # noqa: E402
+from _core.sites import SiteError, Sites, is_admin  # noqa: E402
 from _core.storage import StorageError, make_storage, oidc_token  # noqa: E402
 from _core import holds  # noqa: E402
-from _core.holds import HELD_MESSAGE  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("site-runner")
 
 app = FastAPI(title="Site Runner", docs_url=None, redoc_url=None, openapi_url=None)
 sites = Sites(make_storage(), make_engine())
+content_app = make_content_app(lambda: sites)
 
 
-@app.middleware("http")
-async def remember_oidc_token(request: Request, call_next):
-    """Blob storage authenticates with the per-request OIDC token Vercel attaches to function calls."""
-    oidc_token.set(request.headers.get("x-vercel-oidc-token"))
-    return await call_next(request)
+async def _plain(send, status: int, text: str) -> None:
+    headers = {"content-type": "text/plain; charset=utf-8", **CONTENT_HEADERS}
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status,
+            "headers": [(k.encode(), v.encode()) for k, v in headers.items()],
+        }
+    )
+    await send({"type": "http.response.body", "body": text.encode()})
 
 
-# Shared content runs with an opaque origin: it can't read this app's cookies/storage.
-# Top navigation (on a click only) lets links leave the /s/ wrapper's frame, as they would at top level.
-SANDBOX_FLAGS = (
-    "allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock "
-    "allow-top-navigation-by-user-activation"
-)
-SANDBOX_CSP = f"sandbox {SANDBOX_FLAGS}"
+class HostRouter:
+    """The security boundary between the app and user content, by the Host header (which a browser can't forge).
+
+    Content hosts (under USERCONTENT_BASE_DOMAIN) only reach the content app: no cookies in, none out, and
+    the sandbox/isolation headers on every response. Other hosts reach the app routes, unless this deployment
+    is content-only (CONTENT_ONLY=1). Also remembers the per-request OIDC token Blob storage authenticates with.
+    """
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.inner(scope, receive, send)
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
+        oidc_token.set(headers.get("x-vercel-oidc-token"))
+        label = hosts.content_label(headers.get("host"))  # None when unset or misconfigured: never content
+        if label is None:
+            if hosts.content_only():
+                return await _plain(send, 404, "Not found.")
+            return await self.inner(scope, receive, send)
+
+        scope = dict(scope, headers=[(k, v) for k, v in scope["headers"] if k.lower() != b"cookie"])
+
+        async def send_content(message):
+            if message["type"] == "http.response.start":
+                kept = [(k, v) for k, v in message.get("headers", []) if k.lower() != b"set-cookie"]
+                present = {k.lower() for k, _ in kept}
+                kept += [(k.encode(), v.encode()) for k, v in CONTENT_HEADERS.items() if k.encode() not in present]
+                message = dict(message, headers=kept)
+            await send(message)
+
+        await content_app(scope, receive, send_content)
+
+
+app.add_middleware(HostRouter)
 
 
 @app.exception_handler(SiteError)
@@ -96,15 +134,29 @@ def _ref(meta: dict) -> str:
     return meta.get("slug") or meta["id"]
 
 
+def _secure(request: Request) -> bool:
+    return _base_url(request).startswith("https://")
+
+
+def _cookie(request: Request, name: str) -> str:
+    return auth.cookie_name(name, _secure(request))
+
+
 def _current_user(request: Request) -> dict | None:
     if not auth.enabled():
         return None
-    return auth.verify(request.cookies.get(auth.SESSION_COOKIE))
+    return auth.verify(request.cookies.get(_cookie(request, auth.SESSION_COOKIE)))
+
+
+def _content_config() -> dict:
+    domain = hosts.content_domain()
+    return {"content_scheme": hosts.content_scheme(domain), "content_domain": domain}
 
 
 def _check_origin(request: Request) -> None:
-    """Browser writes must come from this app. Shared sites run with an opaque origin and send
-    "Origin: null", so they can never act with the visitor's session. API and MCP clients send no Origin."""
+    """Browser writes must come from this app's exact origin. Shared sites and previews run on subdomains of the
+    content domain (same-site with the app until it's on the Public Suffix List, so the browser does send the
+    session cookie): their Origin is their own, so they are refused. API and MCP clients send no Origin."""
     origin = request.headers.get("origin")
     if origin is not None and origin != _base_url(request):
         raise SiteError("request from another origin", 403)
@@ -135,6 +187,15 @@ async def health(request: Request):
     }
 
 
+@app.get("/api/config")
+async def config():
+    """Where user content lives, for /app to build preview origins (https://p-<local id>.<content domain>)."""
+    try:
+        return _content_config()
+    except hosts.ConfigError as e:
+        raise SiteError(str(e), 503) from e
+
+
 # ---- Google sign-in ----
 
 
@@ -145,20 +206,20 @@ async def login(request: Request, next: str = "/app"):
     state, cookie = auth.new_state(next)
     res = RedirectResponse(auth.login_url(state, f"{_base_url(request)}/api/auth/callback"), status_code=302)
     res.set_cookie(
-        auth.STATE_COOKIE,
+        _cookie(request, auth.STATE_COOKIE),
         cookie,
         max_age=auth.STATE_TTL,
         httponly=True,
-        secure=_base_url(request).startswith("https"),
+        secure=_secure(request),
         samesite="lax",
-        path="/api/auth",
+        path="/",  # __Host- cookies must use Path=/
     )
     return res
 
 
 @app.get("/api/auth/callback")
 async def callback(request: Request, code: str = "", state: str = "", error: str = ""):
-    saved = auth.verify(request.cookies.get(auth.STATE_COOKIE))
+    saved = auth.verify(request.cookies.get(_cookie(request, auth.STATE_COOKIE)))
     if error or not code or not saved or not state or saved.get("state") != state:
         return RedirectResponse("/app?signin=failed", status_code=302)
     try:
@@ -167,13 +228,17 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         return RedirectResponse("/app?signin=failed", status_code=302)
     await sites.touch_user(user)
     res = RedirectResponse(saved["next"], status_code=302)
-    res.delete_cookie(auth.STATE_COOKIE, path="/api/auth")
+    secure = _secure(request)
+    res.delete_cookie(_cookie(request, auth.STATE_COOKIE), path="/", secure=secure, httponly=True)
+    if secure:  # the cookies' names before the __Host- prefix
+        res.delete_cookie(auth.SESSION_COOKIE, path="/")
+        res.delete_cookie(auth.STATE_COOKIE, path="/api/auth")
     res.set_cookie(
-        auth.SESSION_COOKIE,
+        _cookie(request, auth.SESSION_COOKIE),
         auth.session_value(user),
         max_age=auth.SESSION_TTL,
         httponly=True,
-        secure=_base_url(request).startswith("https"),
+        secure=secure,
         samesite="lax",
         path="/",
     )
@@ -184,7 +249,7 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
 async def logout(request: Request):
     _check_origin(request)
     res = JSONResponse({"ok": True})
-    res.delete_cookie(auth.SESSION_COOKIE, path="/")
+    res.delete_cookie(_cookie(request, auth.SESSION_COOKIE), path="/", secure=_secure(request), httponly=True)
     return res
 
 
@@ -525,117 +590,34 @@ async def cron_cleanup(authorization: str | None = Header(None)):
     return result
 
 
-# ---- Serving shared sites ----
+# ---- Shared links: everything moved to the content hosts ----
 
-
-def _not_found() -> Response:
-    return Response("<h1>404</h1><p>Not found in this site.</p>", 404, media_type="text/html")
-
-
-def _held() -> Response:
-    return Response(
-        f"<h1>451</h1><p>{HELD_MESSAGE}</p>", 451, media_type="text/html", headers={"Cache-Control": "no-store"}
-    )
-
-
-def _is_html(path: str) -> bool:
-    return content_type(path).startswith("text/html")
+_REF = re.compile(r"^([^@]+)(?:@(\d{1,9}))?$", re.ASCII)
 
 
 @app.api_route("/s/{ref}", methods=["GET", "HEAD"])
 @app.api_route("/r/{ref}", methods=["GET", "HEAD"])
-async def serve_root_redirect(ref: str, request: Request):
-    q = f"?{request.url.query}" if request.url.query else ""
-    return RedirectResponse(f"{request.url.path}/{q}", status_code=308)
-
-
-async def _locate(prefix: str, ref: str, path: str) -> Response | tuple[dict, str, str]:
-    """Resolve a shared-site path to (version, file path, digest), or a redirect / 404 response."""
-    site_id, _, vstr = ref.partition("@")
-    pinned = bool(vstr)
-    try:
-        n = int(vstr) if pinned else None
-    except ValueError:
-        return _not_found()
-    try:
-        version = await sites.resolve(site_id, n)
-    except SiteError as e:
-        return _held() if e.status == 451 else _not_found()
-    if version["via_slug"] and version["current_slug"] != version["via_slug"]:
-        # an earlier link name of a renamed site: forward to the current one, keeping the version and path
-        target = version["current_slug"] + (f"@{vstr}" if pinned else "")
-        return RedirectResponse(f"{prefix}{target}/{path}", status_code=308)
-
-    base = f"{prefix}{ref}/"
-    if path == "":
-        if "/" in version["entry"]:
-            return RedirectResponse(base + version["entry"], status_code=307)
-        path = version["entry"]
-    elif path.endswith("/"):
-        path += "index.html"
-
-    digest = await sites.file_digest(version["site_id"], version["n"], path)
-    if digest is None:
-        if await sites.file_digest(version["site_id"], version["n"], f"{path}/index.html"):
-            return RedirectResponse(f"{base}{path}/", status_code=308)
-        return _not_found()
-    return version, path, digest
-
-
-async def _file_response(
-    request: Request, ref: str, path: str, digest: str, transform=None, fixed: bool = True
-) -> Response:
-    # Files never change for a digest, so its hash is the ETag: a revisit gets a 304 instead of the file.
-    # /r/ HTML also depends on the frame script, so its version is part of the tag.
-    etag = f'"{digest}-{FRAME_VERSION}"' if transform else f'"{digest}"'
-    headers = {
-        "Content-Security-Policy": SANDBOX_CSP,
-        "Access-Control-Allow-Origin": "*",
-        "X-Content-Type-Options": "nosniff",
-        # a pinned version's files never change; its start page (fixed=False) can be changed by the owner
-        "Cache-Control": "public, max-age=3600" if "@" in ref and fixed else "no-cache",
-        "ETag": etag,
-    }
-    if etag in [t.strip() for t in request.headers.get("if-none-match", "").split(",")]:
-        return Response(status_code=304, headers=headers)
-    data = await sites.read_blob(digest)
-    if data is None:
-        return _not_found()
-    return Response(transform(data) if transform else data, media_type=content_type(path), headers=headers)
+async def to_content_root(request: Request, ref: str):
+    return await to_content_host(request, ref, "")
 
 
 @app.api_route("/s/{ref}/{path:path}", methods=["GET", "HEAD"])
-async def serve(ref: str, path: str, request: Request):
-    """HTML pages get the wrapper that saves the site's localStorage; other files are served as-is."""
-    found = await _locate("/s/", ref, path)
-    if isinstance(found, Response):
-        return found
-    version, file_path, digest = found
-    if not _is_html(file_path):
-        return await _file_response(request, ref, file_path, digest)
-    html, nonce = wrapper_page(version["site_id"], ref, path, SANDBOX_FLAGS)
-    return Response(
-        html,
-        media_type="text/html; charset=utf-8",
-        headers={
-            # our code only: the shared site itself runs in the sandboxed /r/ frame
-            "Content-Security-Policy": (
-                f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'; "
-                "frame-src 'self'; img-src 'self' https: data:; base-uri 'none'; form-action 'none'"
-            ),
-            "X-Content-Type-Options": "nosniff",
-            "Referrer-Policy": "strict-origin-when-cross-origin",
-            "Cache-Control": "no-cache",
-        },
-    )
-
-
 @app.api_route("/r/{ref}/{path:path}", methods=["GET", "HEAD"])
-async def serve_frame(ref: str, path: str, request: Request):
-    """What the /s/ wrapper frames: the site's files, sandboxed, with the storage script in HTML pages."""
-    found = await _locate("/r/", ref, path)
-    if isinstance(found, Response):
-        return found
-    _, file_path, digest = found
-    transform = (lambda data: frame_page(data, ref)) if _is_html(file_path) else None
-    return await _file_response(request, ref, file_path, digest, transform, fixed=path != "")
+async def to_content_host(request: Request, ref: str, path: str):
+    """/s/<name or id>[@n]/<path> -> https://<id>.<content domain>/[@n/]<path>, keeping the query.
+    /s/ links stay the canonical share links; this app's origin never serves a shared site's files.
+    (/r/ was the sandboxed frame of the old localStorage bridge; its links redirect the same way.)"""
+    m = _REF.match(ref)
+    if not m:
+        return not_found()
+    pinned = m.group(2)
+    try:
+        version = await sites.resolve(m.group(1), int(pinned) if pinned else None)
+        origin = hosts.site_origin(version["site_id"])
+    except SiteError as e:
+        return held() if e.status == 451 else not_found()
+    except hosts.ConfigError as e:
+        raise SiteError(str(e), 503) from e
+    q = f"?{request.url.query}" if request.url.query else ""
+    prefix = f"@{pinned}/" if pinned else ""
+    return RedirectResponse(f"{origin}/{prefix}{quote(path)}{q}", status_code=308)

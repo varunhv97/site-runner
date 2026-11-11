@@ -9,6 +9,7 @@ import pytest
 from _core import scan
 from test_api import make_zip, page
 from test_auth import ALICE, BOB, client, sign_in  # noqa: F401  (client is a fixture)
+from _core import hosts  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -222,6 +223,9 @@ def test_suspicious_uploads_are_held(client, monkeypatch, files, word):
     assert held.status_code == 451 and "waiting for a safety review" in held.text
     assert client.get(f"/s/{sid}/").status_code == 451
     assert client.get(f"/s/{sid}@1/index.html").status_code == 451
+    on_site = {"Host": f"{sid}.{hosts.content_domain()}"}  # the site's own origin, not just the redirects
+    assert client.get("/", headers=on_site).status_code == 451
+    assert client.get("/@1/index.html", headers=on_site).status_code == 451
     assert client.get(f"/api/sites/{sid}/hold").json() == {"held": True, "reasons": body["reasons"]}
 
 

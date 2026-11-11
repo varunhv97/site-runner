@@ -1,6 +1,4 @@
 import io
-import json
-import re
 import zipfile
 
 import pytest
@@ -21,10 +19,11 @@ def make_zip(files: dict[str, str]) -> bytes:
 
 
 def page(client, url: str) -> str:
-    """The HTML file a /s/ link shows: fetched from its /r/ frame, with the original page unwrapped."""
-    r = client.get(url.replace("/s/", "/r/", 1))
+    """The file a /s/ link shows: the app redirects to the site's own host, which serves it."""
+    r = client.get(url)  # follows the 308 to https://<site id>.sites.spinsite.app/...
     assert r.status_code == 200, r.text
-    return json.loads(re.search(r"const PAGE = (.*);\n", r.text).group(1))
+    assert r.url.host.endswith(".sites.spinsite.app") and r.history, r.url
+    return r.text
 
 
 @pytest.fixture
@@ -45,12 +44,12 @@ def test_create_and_serve(client):
     assert body["url"].endswith(f"/s/{sid}/")
 
     assert page(client, f"/s/{sid}/") == "<h1>v1</h1>"  # top-level folder stripped
-    assert "sandbox" in client.get(f"/r/{sid}/").headers["content-security-policy"]
+    assert "sandbox" in client.get(f"/s/{sid}/").headers["content-security-policy"]
     assert client.get(f"/s/{sid}/css/a.css").headers["content-type"].startswith("text/css")
     assert client.get(f"/s/{sid}/missing.js").status_code == 404
 
     r = client.get(f"/s/{sid}", follow_redirects=False)
-    assert r.status_code == 308 and r.headers["location"] == f"/s/{sid}/"
+    assert r.status_code == 308 and r.headers["location"] == f"https://{sid}.sites.spinsite.app/"
 
 
 def test_versions_and_rollback(client):
@@ -84,10 +83,11 @@ def test_requires_token(client):
 
 def test_entry_fallback_and_dir_redirect(client):
     sid = create(client, {"pages/home.html": "home", "docs/index.html": "docs", "readme.txt": "x"})["site"]["id"]
-    r = client.get(f"/s/{sid}/", follow_redirects=False)
-    assert r.headers["location"] == f"/s/{sid}/docs/index.html"
-    r = client.get(f"/s/{sid}/docs", follow_redirects=False)
-    assert r.headers["location"] == f"/s/{sid}/docs/"
+    host = {"Host": f"{sid}.sites.spinsite.app"}
+    r = client.get("/", headers=host, follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == "/docs/index.html"
+    r = client.get("/docs", headers=host, follow_redirects=False)
+    assert r.status_code == 308 and r.headers["location"] == "/docs/"
 
 
 def test_rejects_bad_uploads(client):

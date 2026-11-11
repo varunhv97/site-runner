@@ -22,7 +22,7 @@ def test_owner_takes_a_shared_version_back(client, monkeypatch):
     v = client.get(f"/api/sites/{sid}/versions/1/files").json()
     assert v["entry"] == "home.html" and set(v["files"]) == {"home.html", "a.css"}
     r = client.get(f"/api/sites/{sid}/files/{v['files']['home.html']}")
-    assert r.status_code == 200 and r.text == PAGE  # the original bytes, not the /r/ frame page
+    assert r.status_code == 200 and r.text == PAGE  # the original bytes
     # untrusted content: a download that can never render on the app's origin
     assert r.headers["content-type"] == "application/octet-stream"
     assert r.headers["content-disposition"] == "attachment"

@@ -1,4 +1,4 @@
-// IndexedDB persistence for local sites. Schema must match public/sw.js.
+// IndexedDB persistence for local sites (this app's origin only; previews get copies of the files).
 import { openDB, type IDBPDatabase } from "idb";
 import { pickEntry, type FileMap } from "./ingest";
 
@@ -108,6 +108,18 @@ export async function readVersionFiles(version: LocalVersion): Promise<FileMap> 
     const blob: Blob | undefined = await d.get("files", hash);
     if (!blob) throw new Error(`Missing stored file: ${path}`);
     out[path] = new Uint8Array(await blob.arrayBuffer());
+  }
+  return out;
+}
+
+/** A version's files as separate ArrayBuffers, ready to transfer to the preview origin (lib/preview.ts). */
+export async function readVersionBuffers(version: LocalVersion): Promise<Record<string, ArrayBuffer>> {
+  const d = await db();
+  const out: Record<string, ArrayBuffer> = {};
+  for (const [path, hash] of Object.entries(version.manifest)) {
+    const blob: Blob | undefined = await d.get("files", hash);
+    if (!blob) throw new Error(`Missing stored file: ${path}`);
+    out[path] = await blob.arrayBuffer(); // a fresh buffer per path, so each can be transferred
   }
   return out;
 }

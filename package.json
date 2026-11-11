@@ -8,8 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "dev:api": "set -a; [ -f .env.auth.local ] && . ./.env.auth.local; set +a; uvicorn api.index:app --reload --port 8000",
+    "dev:uc": "set -a; [ -f .env.auth.local ] && . ./.env.auth.local; set +a; CONTENT_ONLY=1 uvicorn api.index:app --reload --port 8001",
     "test": "pytest -q",
-    "test:js": "node --test \"tests/js/*.test.mjs\""
+    "test:js": "node --test \"tests/js/*.test.mjs\" tests/path_rules.test.mjs"
   },
   "dependencies": {
     "fflate": "^0.8.3",

@@ -13,6 +13,7 @@ from sqlalchemy import delete, func, or_, select, update
 
 from .db import bans, rate_limits, reports, users
 from .db import sites as sites_t
+from . import hosts
 from .sites import SiteError, is_admin
 
 REASONS = ("phishing", "malware", "scam", "spam", "illegal", "other")
@@ -65,7 +66,10 @@ def site_ref_from_url(url: str, base_url: str) -> str:
         raise SiteError("That doesn't look like a link.", 400)
     host = parts.hostname.lower()
     base = urlsplit(base_url)
-    domain = (os.environ.get("USERCONTENT_BASE_DOMAIN") or "").strip().lower().strip(".")
+    try:
+        domain = hosts.content_domain().lower()  # the same setting (and local default) content hosts use
+    except hosts.ConfigError:
+        domain = ""
     if host == (base.hostname or "").lower() and port == base.port:
         segments = parts.path.split("/")
         ref = unquote(segments[2]).partition("@")[0] if len(segments) > 2 and segments[1] == "s" else ""

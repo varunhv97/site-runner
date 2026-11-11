@@ -184,7 +184,7 @@ def test_rename_keeps_old_links_and_never_frees_names(client, monkeypatch):
     assert r.status_code == 200 and r.json()["url"] == f"{BASE}/s/ridge-loop/"
     assert page(client, "/s/ridge-loop/") == "v2"
     old = client.get("/s/trail-map@1/index.html", follow_redirects=False)
-    assert old.status_code == 308 and old.headers["location"] == "/s/ridge-loop@1/index.html"
+    assert old.status_code == 308 and old.headers["location"] == f"https://{sid}.sites.spinsite.app/@1/index.html"
     assert page(client, "/s/trail-map@1/") == "v1"  # following the redirect, pinned version kept
 
     client.delete(f"/api/sites/{sid}")
@@ -243,3 +243,52 @@ def test_production_requires_public_base_url(client, monkeypatch):
     r = client.get("/api/auth/login", headers={"X-Forwarded-Host": "evil.example"}, follow_redirects=False)
     q = parse_qs(urlparse(r.headers["location"]).query)
     assert q["redirect_uri"] == ["https://spinsite.app/api/auth/callback"]
+
+
+def test_cookies_use_the_host_prefix_over_https(client, monkeypatch):
+    """Shared sites live on subdomains of the app's domain, so the app's cookies must be __Host- cookies:
+    a subdomain can't set those (no Domain attribute allowed), which stops it planting a session."""
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://spinsite.app")
+    r = client.get("/api/auth/login", follow_redirects=False)
+    cookie = r.headers["set-cookie"]
+    assert cookie.startswith("__Host-sr_oauth_state=") and "Path=/;" in cookie and "Domain" not in cookie
+    assert "secure" in cookie.lower()
+
+    async def fake_fetch(code, redirect_uri):
+        return ALICE
+
+    monkeypatch.setattr(auth, "fetch_google_user", fake_fetch)
+    state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
+    signed = r.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1]
+    r = client.get(
+        f"/api/auth/callback?code=c&state={state}",
+        headers={"Cookie": f"__Host-sr_oauth_state={signed}"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 302 and r.headers["location"] == "/app"
+    cookies = r.headers.get_list("set-cookie")
+    session = next(c for c in cookies if c.startswith("__Host-sr_session="))
+    assert "secure" in session.lower() and "Path=/" in session and "Domain" not in session
+    value = session.split(";", 1)[0].split("=", 1)[1]
+    me = client.get("/api/auth/me", headers={"Cookie": f"__Host-sr_session={value}"}).json()
+    assert me["user"]["email"] == ALICE["email"]
+    # the old, unprefixed name is no longer read
+    assert client.get("/api/auth/me", headers={"Cookie": f"sr_session={value}"}).json()["user"] is None
+
+
+def test_plain_cookie_names_over_http(client):
+    # local dev over http: __Host- cookies need Secure, which browsers drop on http
+    cookie = client.get("/api/auth/login", follow_redirects=False).headers["set-cookie"]
+    assert cookie.startswith("sr_oauth_state=") and "Path=/;" in cookie
+
+
+def test_writes_from_shared_site_subdomains_are_refused(client, monkeypatch):
+    """Shared sites are same-site with the app (sites.spinsite.app), so the browser sends the session cookie
+    with their requests. The exact-origin check is what refuses them."""
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://spinsite.app")
+    monkeypatch.setattr(server, "_current_user", lambda request: ALICE)
+    for origin in ("https://abc.sites.spinsite.app", "https://p-0123456789ab.sites.spinsite.app", "null"):
+        assert share(client, headers={"Origin": origin}).status_code == 403, origin
+        assert client.post("/api/sites/abc/token", headers={"Origin": origin}).status_code == 403, origin
+        assert client.post("/api/auth/logout", headers={"Origin": origin}).status_code == 403, origin
+    assert share(client, headers={"Origin": "https://spinsite.app"}).status_code == 200

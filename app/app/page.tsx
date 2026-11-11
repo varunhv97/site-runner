@@ -15,6 +15,8 @@ import {
 import { executableMessage, findExecutable } from "@/lib/executables";
 import { describe as describeSecret, scanFiles } from "@/lib/secrets";
 import { useDialog } from "./AppDialog";
+import Preview from "./Preview";
+import { cleanUpOldPreview, contentConfig, type ContentConfig } from "@/lib/preview";
 import {
   deleteRemoteVersion,
   downloadLiveVersion,
@@ -38,16 +40,6 @@ import {
   type Me,
   type Usage,
 } from "@/lib/share";
-
-async function registerPreviewWorker() {
-  if (!("serviceWorker" in navigator)) throw new Error("This browser doesn't support Service Workers.");
-  const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/preview/" });
-  if (reg.active) return;
-  const sw = reg.installing ?? reg.waiting;
-  await new Promise<void>((resolve) => {
-    sw?.addEventListener("statechange", () => sw.state === "activated" && resolve());
-  });
-}
 
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -122,7 +114,7 @@ function CopyLink({ url }: { url: string }) {
 }
 
 export default function Home() {
-  const [ready, setReady] = useState(false);
+  const [config, setConfig] = useState<ContentConfig | null>(null);
   const [sites, setSites] = useState<LocalSite[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [previewN, setPreviewN] = useState<number | null>(null);
@@ -142,8 +134,9 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    registerPreviewWorker()
-      .then(() => setReady(true))
+    cleanUpOldPreview();
+    contentConfig()
+      .then(setConfig)
       .catch((e) => setError(String(e.message ?? e)));
     listSites().then(setSites);
     fetchMe().then((m) => {
@@ -628,16 +621,13 @@ export default function Home() {
                 </tbody>
               </table>
 
-              {ready && shownN && (
-                <div className="preview">
-                  <div className="preview-bar">
-                    <span className="muted">Local preview · v{shownN}</span>
-                    <a href={`/preview/${site.id}/${shownN}/`} target="_blank" rel="noreferrer">
-                      Open in new tab ↗
-                    </a>
-                  </div>
-                  <iframe key={`${site.id}-${shownN}-${site.versions.find((x) => x.n === shownN)?.entry}`} src={`/preview/${site.id}/${shownN}/`} title="preview" />
-                </div>
+              {config && shownN && (
+                <Preview
+                  key={`${site.id}-${shownN}-${site.versions.find((x) => x.n === shownN)?.entry}`}
+                  config={config}
+                  siteId={site.id}
+                  version={site.versions.find((x) => x.n === shownN)!}
+                />
               )}
             </>
           )}

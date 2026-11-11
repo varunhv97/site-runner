@@ -128,6 +128,13 @@ async def fetch_google_user(code: str, redirect_uri: str) -> dict:
     return {"sub": info["sub"], "email": info.get("email", ""), "name": info.get("name", "")}
 
 
+def cookie_name(name: str, secure: bool) -> str:
+    """Over https the cookies carry the __Host- prefix: the browser then only accepts them from this exact host
+    (Secure, Path=/, no Domain), so a page on a subdomain (shared sites live on sites.<app domain>) can't plant
+    one. Plain http (local dev) can't set __Host- cookies, so the plain name is used there."""
+    return f"__Host-{name}" if secure else name
+
+
 def session_value(user: dict) -> str:
     return sign(
         {"sub": user["sub"], "email": user["email"], "name": user["name"], "exp": int(time.time()) + SESSION_TTL}

@@ -1,25 +1,21 @@
 # Architecture
 
 ```
-Browser ─┬─ public/index.html  landing page at / (static, taste-skill kit in public/assets)
-         ├─ app/app/page.tsx (the tool, at /app) · app/report (report abuse) · app/admin (review)
-         │    ├─ lib/ingest.ts      files/folders/zip → {path: bytes}   (fflate)
-         │    ├─ lib/localStore.ts  IndexedDB: sites + content-addressed files (idb)
-         │    └─ lib/share.ts       zip a version → POST /api/...
-         └─ public/sw.js  Service Worker, scope /preview/ → serves files from IndexedDB
-
-Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · private Blob: files
-              ├─ /api/sites ...        create / add version / set live / get meta
-              ├─ /s/<id>[@n]/<path>    HTML: wrapper page (frames /r/, keeps localStorage); other files as-is
-              ├─ /r/<id>[@n]/<path>    shared files (sandbox CSP, CORS *); HTML gets the storage script
-              ├─ _core/frames.py       wrapper page + in-frame storage script
-              ├─ _core/abuse.py        reports, bans, report rate limit
-              ├─ _core/sites.py        zip validation, versions, access, limits, cleanup
-              ├─ _core/scan.py         refuses executables; flags phishing / seed phrases / miners
-              ├─ _core/holds.py        `holds` table: flagged sites answer 451 until an admin decides
-              ├─ _core/db.py           SQLAlchemy tables; Postgres via DATABASE_URL, else SQLite (.data/)
-              └─ _core/storage.py      LocalStorage (.data/) | BlobStorage (Vercel Blob REST)
+spinsite.app (app origin: cookies, IndexedDB with edit tokens; never runs user HTML)
+  ├─ public/index.html  landing page at /
+  ├─ app/app/page.tsx   the tool at /app · app/report (report abuse) · app/admin (review)
+  │    ├─ lib/ingest.ts      files/folders/zip → {path: bytes} (fflate)
+  │    ├─ lib/localStore.ts  IndexedDB: sites + content-addressed files (idb)
+  │    ├─ lib/preview.ts     hands a version's files to p-<id>.<UC> by postMessage
+  │    └─ lib/share.ts       zip a version → POST /api/...
+  └─ api/index.py (FastAPI) /api/*, and /s/ + /r/ → 308 to the site's host
+<site id>.<UC>           one shared site: / live, /@<n>/ pinned   (api/_core/content.py)
+p-<local id>.<UC>        one local preview: /__sr/boot + /__sr/sw.js from the server, the rest from the worker
+api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path rules) · preview/*.js (boot, worker)
+           sites.py (zips, versions, limits) · db.py (Postgres | SQLite) · storage.py (Blob | .data/)
+           abuse.py (reports, bans, rate limit) · scan.py (executables; phishing/seed/miner) · holds.py (451 until reviewed)
 ```
+`<UC>` = `USERCONTENT_BASE_DOMAIN` (`sites.spinsite.app`; dev `usercontent.localhost:8001`).
 
 ## Landing page
 - Built with the taste-skill (`~/.claude/skills/design-taste-frontend`). Kit copied to `public/assets`
@@ -28,20 +24,31 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
 - `next.config.ts` rewrites `/` → `/index.html`. The tool reuses the same tokens in `app/globals.css`.
 - Checks: `node <skill>/scripts/gate.mjs public/index.html` (run from the project root).
 
-## Routing
-- Dev: `next.config.ts` rewrites `/api/*`, `/s/*` and `/r/*` → `127.0.0.1:8000`. There's an explicit trailing-slash rule
-  because `:path*` drops it. `skipTrailingSlashRedirect` stops Next stripping `/s/<id>/`.
+## Origins and routing
+- `HostRouter` (api/index.py) dispatches by the Host header only (never X-Forwarded-Host). Hosts under `<UC>` reach
+  only the content app: no app routes, cookie header dropped, any Set-Cookie dropped, and every response gets
+  `CSP: sandbox allow-same-origin allow-scripts …`, `Origin-Agent-Cluster: ?1`, `nosniff`. Other hosts get the
+  app routes, unless `CONTENT_ONLY=1` (the content deployment: 404). Ids have no hyphen, so `p-` can't clash.
+- Site hosts take ids only (never link names). `Service-Worker: script` → 403 there (takedowns stick).
+  Uploads with a top-level `@<digits>` folder are refused (it would hide behind `/@n/`).
+- `/s/<ref>[@n]/<path>` (and the old `/r/`) resolve the link name (old ones too) and 308 to
+  `<scheme>://<id>.<UC>/[@n/]<path>?<query>`. Share links stay `spinsite.app/s/<slug>/`.
+- Cookies are `__Host-sr_session` / `__Host-sr_oauth_state` over https (a subdomain can't plant them); plain
+  names on http dev. `_check_origin` requires Origin == PUBLIC_BASE_URL exactly, so site subdomains are refused.
+- Dev: `next.config.ts` rewrites `/api/*`, `/s/*` and `/r/*` → `127.0.0.1:8000`; `npm run dev:uc` serves `<UC>` on
+  :8001. There's an explicit trailing-slash rule because `:path*` drops it.
 - Python deps: Vercel reads `pyproject.toml` `[project].dependencies` (not requirements.txt) when it exists. Keep both in sync.
 - Prod: `www.spinsite.app` 308s to `spinsite.app` (one origin for cookies, IndexedDB and sign-in). The old
   `spinsite.vercel.app` redirects `/`, `/s/`, `/r/` and sign-in; its `/app` stays so local sites remain reachable.
   `vercel.json` rewrites `/api/*`, `/s/*` and `/r/*` → `api/index.py`. `api/_core` is underscore-prefixed so
-  Vercel doesn't treat it as functions.
+  Vercel doesn't treat it as functions. `<UC>` is a second Vercel project from this repo (docs/deploying.md):
+  Framework Other, empty output dir, `CONTENT_ONLY=1`, and a host-conditioned catch-all rewrite to the function.
 
 ## Sign-in (Google)
-- `api/_core/auth.py`: OAuth code flow via async httpx; signed httpOnly cookie `sr_session` (HMAC, SESSION_SECRET), 30 days.
-- Routes: `/api/auth/login`, `/api/auth/callback`, `/api/auth/logout`, `/api/auth/me`, `/api/me/sites`, `/api/sites/<id>/claim`.
+- `api/_core/auth.py`: OAuth code flow via async httpx; signed httpOnly session cookie (HMAC, SESSION_SECRET), 30 days.
+- Cookie names get the `__Host-` prefix over https (see Origins). Routes: `/api/auth/login`, `/api/auth/callback`, `/api/auth/logout`, `/api/auth/me`, `/api/me/sites`, `/api/sites/<id>/claim`.
 - With GOOGLE_CLIENT_ID/SECRET set, sharing requires sign-in; the owner publishes without a token; edit tokens still work (API/MCP).
-- Browser writes must send this app's Origin (shared sites send `Origin: null` and are refused).
+- Browser writes must send this app's exact Origin (shared sites and previews have their own and are refused).
 - Unpublish sets `sites.deleted_at` (links 404); admins (ADMIN_EMAILS) can unpublish any site.
 - Limits per account: 50 sites, 200 versions a site (current ones; deleting frees room), 100 uploads a day,
   storage quota (below). Hidden files are dropped (client and server). Local dev reads keys from `.env.auth.local`.
@@ -50,7 +57,7 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
 - **Database** (`_core/db.py`): `sites` (owner, token hash, live version, deleted_at), `versions`,
   `version_files` (site, version, path → sha256), `slugs` (link names, never deleted; newest = current),
   `users`, `uploads` (per user per day), `blobs` (digest → size), `deleted_versions` (site, n: never reused),
-  `reports`, `bans`, `rate_limits` (abuse, below). `/s/<ref>` resolves a random id first, then a link name; old names 308 to the current one.
+  `reports`, `bans`, `rate_limits` (abuse, below), `holds` (upload safety, below). `/s/<ref>` resolves a random id first, then a link name (old names too), then 308s to the id host.
   Publishing is one transaction with the site row locked (`FOR UPDATE`); serving a file is one indexed lookup.
   Schema is created on first use (`create_all`); add migrations (Alembic) before changing columns.
 - **Blob** (`_core/storage.py`): only `blobs/<sha256>` file contents. Private store (`BLOB_ACCESS`); the token is
@@ -78,16 +85,18 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
 - `sites` (keyPath id): LocalSite incl. `versions[].manifest` and optional `remote {siteId, token, url, live, pushed}`
 - `files` (key = sha256): Blob
 
-## Saved localStorage for shared sites (`_core/frames.py`)
-- `/s/` wrapper (our code, strict nonce CSP, `frame-src 'self'`) frames `/r/` (sandboxed, opaque origin).
-- `/r/` HTML = script that asks the wrapper for a seed, installs an in-memory `localStorage`, then
-  `document.write`s the original page. Writes are posted up; the wrapper stores them in its localStorage
-  under `sr-site-data:<site id>` (read-modify-write per message, so tabs merge per key). Caps: 512K chars a
-  site, 2M chars for all sites together.
-- Wrapper only accepts messages from its own frame with origin `null`; when framed itself it sends no data.
-- Frame reports path/hash/title; the wrapper mirrors them into its address bar (only under its own `/s/<ref>/`).
-- Links leaving the site get `target=_top` (`allow-top-navigation-by-user-activation`).
-- Tests: `tests/test_frames.py`. Browser behaviour was checked by hand in headless Chrome (see tasks.md).
+## Local preview hand-off (files never leave the browser)
+1. /app frames `p-<lid>.<UC>/__sr/boot` (`sandbox="allow-scripts allow-same-origin allow-forms allow-popups
+   allow-modals"`). Boot (our code, nonce CSP, `frame-ancestors` = app) registers `/__sr/sw.js` (scope /,
+   `Service-Worker-Allowed: /`), waits for control, posts `{sr:"ready"}` to parent/opener at the app's exact origin.
+2. /app accepts it only from that iframe's window (or the tab it opened) and exact origin, then posts
+   `{sr:"files", version, entry, files}` (ArrayBuffers transferred) to that origin only. Nothing else is sent.
+3. Boot accepts files only from the app origin + parent/opener, writes them and a manifest to Cache Storage,
+   acks `loaded`, drops `window.opener`, `location.replace("/")`. The worker serves `/…` with the shared path
+   rules and the sandbox headers; `/__sr/*` always goes to the network.
+4. New tab = `window.open(boot)` with the same hand-off (top level has its own storage partition). No "ready"
+   within 8 s (Safari can block workers in frames) → /app offers "Open preview in a new tab".
+5. public/sw.js only unregisters itself; /app removes old registrations and `sr-site-data:*` keys.
 
 ## Upload safety
 - `scan.py` runs in `Upload()`: executables → 400 (extensions in `lib/blocked-files.json`, mirrored in Python and
@@ -95,9 +104,10 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
   (512KB a file, 4MB total): phishing needs a password field + two of brand / external credential target / known
   drop (Telegram bot, Discord webhook, form relays); "Sign in with Google" text doesn't count as a brand.
 - Findings → row in `holds` (site, n, reasons, status held/approved/rejected, reviewer). `Sites.resolve()` raises
-  451 while any row is held, so every serving path shows "waiting for a safety review". Admins approve or reject
+  451 while any row is held, so the content host (`content.py`) and the `/s/` redirect show "waiting for a safety review". Admins approve or reject
   (reject = admin unpublish) via `/api/admin/holds`.
 - Client: `lib/executables.ts` (same list) blocks Share; `lib/secrets.ts` warns about likely keys before Share.
 
-## Path resolution (same in sw.js and index.py)
-`/` → entry (redirect if entry is in a subfolder) · `dir/` → `dir/index.html` · `dir` with `dir/index.html` → redirect to `dir/`.
+## Path resolution (`_core/paths.py` = `_core/preview/lib.js`, cases in `tests/path_rules.json`)
+`/` → entry (307 if entry is in a subfolder) · `dir/` → `dir/index.html` · `dir` with `dir/index.html` → 308 to `dir/`.
+Applied under `/` and `/@<n>/`. Pinned files `max-age=3600` except the start-page URL; live `no-cache`; ETag = digest.

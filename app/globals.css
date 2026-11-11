@@ -122,6 +122,8 @@ aside, section { min-width: 0; }
 .preview-bar .muted { color: #535b51; }
 .preview-bar a { color: #262d24; }
 .preview iframe { width: 100%; height: 70vh; border: 1px solid rgba(0, 0, 0, 0.12); border-radius: var(--r-md); background: #fff; display: block; }
+.preview .error { margin: 0 0 12px; }
+.preview-blocked { display: grid; gap: 12px; justify-items: start; padding: 24px; border-radius: var(--r-md); background: #fff; color: #262d24; }
 
 .account { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .who { font-size: 14px; }
