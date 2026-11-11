@@ -1,5 +1,6 @@
 // Talks to the Python share API (/api/*).
 import { zipSync } from "fflate";
+import type { FileMap } from "./ingest";
 import { readVersionFiles, type LocalSite, type LocalVersion } from "./localStore";
 
 const MAX_ZIP = 4 * 1024 * 1024;
@@ -222,4 +223,40 @@ export async function setRemoteEntry(site: LocalSite, remoteN: number, entry: st
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${site.remote.token}` },
     body: JSON.stringify({ entry }),
   });
+}
+
+/** A site the signed-in account shared, as /api/me/sites lists it. */
+export type AccountSite = { id: string; slug: string | null; name: string; live: number | null; url: string };
+
+export async function fetchAccountSites(): Promise<AccountSite[]> {
+  try {
+    return (await call<{ sites: AccountSite[] }>("/api/me/sites", {})).sites;
+  } catch {
+    return [];
+  }
+}
+
+/** The live version's original files and start page, for its owner to open in this browser. */
+export async function downloadLiveVersion(site: AccountSite): Promise<{ files: FileMap; entry: string; n: number }> {
+  const n = site.live!;
+  const v = await call<{ entry: string; files: Record<string, string> }>(`/api/sites/${site.id}/versions/${n}/files`, {});
+  const byDigest = new Map<string, Promise<Uint8Array>>(); // a file used twice downloads once
+  const get = (digest: string, path: string) => {
+    if (!byDigest.has(digest)) {
+      byDigest.set(
+        digest,
+        fetch(`/api/sites/${site.id}/files/${digest}`).then(async (res) => {
+          if (!res.ok) throw new Error(`Couldn't download ${path} (${res.status}).`);
+          return new Uint8Array(await res.arrayBuffer());
+        }),
+      );
+    }
+    return byDigest.get(digest)!;
+  };
+  const files: FileMap = {};
+  const entries = Object.entries(v.files);
+  for (let i = 0; i < entries.length; i += 6) {
+    await Promise.all(entries.slice(i, i + 6).map(async ([path, digest]) => (files[path] = await get(digest, path))));
+  }
+  return { files, entry: v.entry, n };
 }

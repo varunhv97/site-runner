@@ -35,6 +35,9 @@
 - [x] Start page picker (2026-11-10): asked when there's no index.html and several pages; changeable per version;
   sent with shares (`entry`) and changeable on shared versions
 
+- [x] "Shared from your account" in /app (2026-11-11): lists the account's shared sites missing from this browser;
+  Open here downloads the live version and links it, so publishing updates the same link
+
 ## Next
 - [ ] **HIGH PRIORITY:** serve local previews from a separate origin. Today a malicious zip previewed locally
   runs same-origin as the app and can read the edit tokens in IndexedDB
@@ -43,7 +46,6 @@
 - [ ] Optional: a Neon `dev` branch for testing against real Postgres
 - [ ] Add Alembic migrations before the first schema change
 - [ ] Pre-share warning + secret scan (API keys in JS); optional expiry for old shares
-- [ ] "Your shared sites" list in /app (server side exists: /api/me/sites)
 - [ ] Report-abuse link and contact address
 - [ ] MCP server (Python FastMCP): create_site, upload_version, list_versions, set_live, diff_versions
 - [ ] Serve shared content from a separate domain (stronger isolation; would replace the localStorage bridge)

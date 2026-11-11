@@ -81,6 +81,13 @@ aside, section { min-width: 0; }
 .site strong { font-weight: 500; }
 .site span { font-size: 14px; }
 .site.active { border-color: var(--accent); background: var(--surface); }
+.account-sites { display: grid; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.account-sites > p { margin: 0; font-size: 14px; }
+.account-site { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px;
+  border: 1px dashed var(--line); border-radius: var(--r-md); }
+.account-site > span { display: grid; gap: 2px; min-width: 0; }
+.account-site strong { font-weight: 500; }
+.account-site .small-link { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .site:hover { transform: translateY(-2px); }
 
 .empty { padding: 72px 24px; text-align: center; border: 1px solid var(--line); border-radius: var(--r-lg); }

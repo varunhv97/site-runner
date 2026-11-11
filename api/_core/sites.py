@@ -587,6 +587,35 @@ class Sites:
             await conn.execute(update(sites).where(sites.c.id == site_id).values(live=n))
             return await self.public_meta(site_id, conn)
 
+    async def version_files(self, site_id: str, token: str | None, n: int, user: dict | None = None) -> dict:
+        """A shared version's files (path -> digest) and start page, for its owner to take back into a browser."""
+        await self._ready()
+        async with self.engine.connect() as conn:
+            self.check_access(await self._site(conn, site_id), token, user)
+            row = (await conn.execute(select(versions).where(versions.c.site_id == site_id, versions.c.n == n))).first()
+            if row is None:
+                raise SiteError("no such version", 404)
+            q = select(version_files.c.path, version_files.c.digest).where(
+                version_files.c.site_id == site_id, version_files.c.n == n
+            )
+            files = {r.path: r.digest for r in (await conn.execute(q)).all()}
+        return {"n": n, "entry": row.entry, "files": files}
+
+    async def site_blob(self, site_id: str, token: str | None, digest: str, user: dict | None = None) -> bytes:
+        """One file's original bytes, only when one of this site's versions uses it."""
+        await self._ready()
+        async with self.engine.connect() as conn:
+            self.check_access(await self._site(conn, site_id), token, user)
+            q = select(version_files.c.digest).where(
+                version_files.c.site_id == site_id, version_files.c.digest == digest
+            )
+            if (await conn.execute(q.limit(1))).first() is None:
+                raise SiteError("no such file in this site", 404)
+        data = await self.read_blob(digest)
+        if data is None:
+            raise SiteError("no such file in this site", 404)
+        return data
+
     async def set_entry(self, site_id: str, token: str | None, n: int, entry: str, user: dict | None = None) -> dict:
         """Change which page a shared version opens on (its live and pinned links)."""
         await self._ready()

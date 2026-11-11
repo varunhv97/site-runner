@@ -6,6 +6,8 @@ import { addVersion, deleteSite, listSites, saveSite, setVersionEntry, type Loca
 import { useDialog } from "./AppDialog";
 import {
   deleteRemoteVersion,
+  downloadLiveVersion,
+  fetchAccountSites,
   fetchMe,
   fetchUsage,
   pinnedUrl,
@@ -20,6 +22,7 @@ import {
   signInUrl,
   signOut,
   unpublish,
+  type AccountSite,
   type Me,
   type Usage,
 } from "@/lib/share";
@@ -115,6 +118,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [me, setMe] = useState<Me>({ enabled: false, user: null });
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [accountSites, setAccountSites] = useState<AccountSite[]>([]);
   const { ask, dialog } = useDialog();
 
   const site = sites.find((s) => s.id === selectedId) ?? null;
@@ -132,6 +136,7 @@ export default function Home() {
     fetchMe().then((m) => {
       setMe(m);
       if (m.user) fetchUsage().then(setUsage);
+      if (m.user) fetchAccountSites().then(setAccountSites);
       if (new URLSearchParams(location.search).get("signin") === "failed") {
         setError("Google sign-in didn't finish. Try again, and pick an account with a verified email.");
       }
@@ -139,7 +144,23 @@ export default function Home() {
   }, []);
 
   const mustSignIn = me.enabled && !me.user;
-  const refreshUsage = async () => setUsage(await fetchUsage());
+  const refreshUsage = async () => {
+    setUsage(await fetchUsage());
+    setAccountSites(await fetchAccountSites());
+  };
+
+  // Shared from this account but not in this browser (another browser or device, cleared data, the old domain).
+  const notHere = accountSites.filter((a) => a.live !== null && !sites.some((s) => s.remote?.siteId === a.id));
+  const openHere = (a: (typeof accountSites)[number]) =>
+    run(`Opening ${a.name}…`, async () => {
+      const { files, entry, n } = await downloadLiveVersion(a);
+      const s = await addVersion(files, null, a.name, `Shared version ${n}`, entry);
+      // linked to the shared site, so the next publish updates its links (as the signed-in owner; no token here)
+      s.remote = { siteId: a.id, slug: a.slug, token: "", url: a.url, live: a.live, pushed: { 1: n } };
+      await saveSite(s);
+      setPreviewN(1);
+      await refresh(s.id);
+    });
 
   async function run(label: string, fn: () => Promise<void>) {
     setBusy(label);
@@ -270,6 +291,26 @@ export default function Home() {
               </li>
             ))}
           </ul>
+          {me.user && notHere.length > 0 && (
+            <div className="account-sites">
+              <p className="muted">Shared from your account, not in this browser</p>
+              <ul className="sites">
+                {notHere.map((a) => (
+                  <li key={a.id} className="account-site">
+                    <span>
+                      <strong>{a.name}</strong>
+                      <a className="small-link" href={a.url} target="_blank" rel="noreferrer">
+                        /s/{a.slug ?? a.id}/
+                      </a>
+                    </span>
+                    <button className="small" disabled={!!busy} onClick={() => openHere(a)}>
+                      Open here
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {usage && (
             <div className="usage">
               <span className="muted">
@@ -351,8 +392,17 @@ export default function Home() {
                   </button>
                   <details>
                     <summary className="muted">Edit token</summary>
-                    <code>{site.remote.token}</code>
-                    <p className="muted">Anyone with this token can publish versions of this site, through the API or MCP.</p>
+                    {site.remote.token ? (
+                      <>
+                        <code>{site.remote.token}</code>
+                        <p className="muted">Anyone with this token can publish versions of this site, through the API or MCP.</p>
+                      </>
+                    ) : (
+                      <p className="muted">
+                        This browser doesn&apos;t have this site&apos;s edit token. You can still publish while signed in. Replace it
+                        to get a new one here (the old one stops working).
+                      </p>
+                    )}
                     <button
                       className="small"
                       disabled={!!busy}

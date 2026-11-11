@@ -19,6 +19,8 @@ the app's own origin. Scripts send no `Origin` header and authenticate with a si
 | `DELETE` | `/api/sites/<id>` (unpublish) | owner, token or admin |
 | `POST` | `/api/sites/<id>/claim` (attach a token-made site to your account) | signed in + token |
 | `GET` | `/api/sites/<id>` | none |
+| `GET` | `/api/sites/<id>/versions/<n>/files` → `{"entry", "files": {path: digest}}` | owner or token |
+| `GET` | `/api/sites/<id>/files/<digest>` (original bytes, as a sandboxed download) | owner or token |
 
 ## Account
 

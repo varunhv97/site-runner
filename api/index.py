@@ -284,6 +284,29 @@ async def set_live(request: Request, site_id: str, body: LiveBody, authorization
     return {"site": meta}
 
 
+@app.get("/api/sites/{site_id}/versions/{n}/files")
+async def version_files(request: Request, site_id: str, n: int, authorization: str | None = Header(None)):
+    """A version's files and start page, so its owner can open the site in another browser."""
+    return await sites.version_files(site_id, _bearer(authorization), n, _current_user(request))
+
+
+@app.get("/api/sites/{site_id}/files/{digest}")
+async def site_file(request: Request, site_id: str, digest: str, authorization: str | None = Header(None)):
+    """One file's original bytes for the owner. Always a sandboxed download: the bytes are a shared site's
+    (untrusted) content, so they must never render on this app's origin."""
+    data = await sites.site_blob(site_id, _bearer(authorization), digest, _current_user(request))
+    return Response(
+        data,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": "attachment",
+            "Content-Security-Policy": "sandbox; default-src 'none'",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, max-age=31536000, immutable",  # a digest's bytes never change
+        },
+    )
+
+
 @app.post("/api/sites/{site_id}/versions/{n}/entry")
 async def set_entry(request: Request, site_id: str, n: int, body: EntryBody, authorization: str | None = Header(None)):
     """Change the page a shared version opens on."""
