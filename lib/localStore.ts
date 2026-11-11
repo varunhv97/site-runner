@@ -59,8 +59,14 @@ export async function deleteSite(id: string) {
 }
 
 /** Store files as a new version of `site` (or a brand-new site when site is null). */
-export async function addVersion(files: FileMap, site: LocalSite | null, name: string, note = ""): Promise<LocalSite> {
-  const entry = pickEntry(Object.keys(files));
+export async function addVersion(
+  files: FileMap,
+  site: LocalSite | null,
+  name: string,
+  note = "",
+  start?: string,
+): Promise<LocalSite> {
+  const entry = start ?? pickEntry(Object.keys(files));
   if (!entry) throw new Error("No .html file found in what you dropped.");
 
   const d = await db();
@@ -82,6 +88,16 @@ export async function addVersion(files: FileMap, site: LocalSite | null, name: s
   target.versions.push({ n: target.versions.length + 1, createdAt: Date.now(), note, entry, size, manifest });
   await d.put("sites", target);
   return target;
+}
+
+/** Change which page a local version opens on. */
+export async function setVersionEntry(original: LocalSite, n: number, entry: string): Promise<LocalSite> {
+  const site = structuredClone(original);
+  const version = site.versions.find((v) => v.n === n);
+  if (!version || !(entry in version.manifest)) throw new Error("That page isn't in this version.");
+  version.entry = entry;
+  await saveSite(site);
+  return site;
 }
 
 export async function readVersionFiles(version: LocalVersion): Promise<FileMap> {

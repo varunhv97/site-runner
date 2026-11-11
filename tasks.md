@@ -32,6 +32,9 @@
   uploads count toward the daily limit (owner, else `site:<id>`), /api/health minimal in production, total cap
   on shared sites' saved data, MIT LICENSE, SECURITY.md
 
+- [x] Start page picker (2026-11-10): asked when there's no index.html and several pages; changeable per version;
+  sent with shares (`entry`) and changeable on shared versions
+
 ## Next
 - [ ] **HIGH PRIORITY:** serve local previews from a separate origin. Today a malicious zip previewed locally
   runs same-origin as the app and can read the edit tokens in IndexedDB

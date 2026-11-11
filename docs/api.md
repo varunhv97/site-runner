@@ -8,8 +8,9 @@ the app's own origin. Scripts send no `Origin` header and authenticate with a si
 
 | Method | Path | Auth |
 | --- | --- | --- |
-| `POST` | `/api/sites` (multipart: zip, name, note, optional slug) | signed in |
-| `POST` | `/api/sites/<id>/versions` (multipart: zip, note) | owner or token |
+| `POST` | `/api/sites` (multipart: zip, name, note, optional slug, optional entry) | signed in |
+| `POST` | `/api/sites/<id>/versions` (multipart: zip, note, optional entry) | owner or token |
+| `POST` | `/api/sites/<id>/versions/<n>/entry` `{"entry": "home.html"}` | owner or token |
 | `POST` | `/api/sites/<id>/live` `{"version": n}` | owner or token |
 | `POST` | `/api/sites/<id>/token` (replace the edit token) | owner or token |
 | `POST` | `/api/sites/<id>/slug` `{"slug": "learn-sql"}` | owner or token |
@@ -26,6 +27,12 @@ the app's own origin. Scripts send no `Origin` header and authenticate with a si
 | `GET` | `/api/auth/me` | none |
 | `GET` | `/api/me/sites` | signed in |
 | `GET` | `/api/me/usage` → `{"used_bytes", "quota_bytes"}` | signed in |
+
+## Start page
+
+`entry` is the page a version opens on: one of its `.html` files. Without it, the server picks `index.html`, else
+the shallowest page (alphabetical). `/app` asks which page to use when there's no `index.html` and several pages,
+and sends its choice with every share.
 
 ## Shared sites
 

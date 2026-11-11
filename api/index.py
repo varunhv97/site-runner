@@ -210,6 +210,7 @@ async def create_site(
     name: str = Form(""),
     note: str = Form(""),
     slug: str = Form(""),
+    entry: str = Form(""),
 ):
     _check_origin(request)
     user = _current_user(request)
@@ -218,7 +219,9 @@ async def create_site(
     if not auth.enabled() and os.environ.get("VERCEL_ENV") == "production":
         # no anonymous public hosting: production shares only once Google sign-in is configured
         raise SiteError("Sharing opens once Google sign-in is set up on this site", 503)
-    meta, token = await sites.create(name, await file.read(), note, owner=user, slug=slug.strip().lower() or None)
+    meta, token = await sites.create(
+        name, await file.read(), note, owner=user, slug=slug.strip().lower() or None, entry=entry or None
+    )
     return {
         "site": meta,
         "edit_token": token,
@@ -233,11 +236,12 @@ async def add_version(
     site_id: str,
     file: UploadFile = File(...),
     note: str = Form(""),
+    entry: str = Form(""),
     authorization: str | None = Header(None),
 ):
     _check_origin(request)
     meta = await sites.add_version(
-        site_id, _bearer(authorization), await file.read(), note, user=_current_user(request)
+        site_id, _bearer(authorization), await file.read(), note, user=_current_user(request), entry=entry or None
     )
     return {
         "site": meta,
@@ -248,6 +252,10 @@ async def add_version(
 
 class LiveBody(BaseModel):
     version: int
+
+
+class EntryBody(BaseModel):
+    entry: str
 
 
 class SlugBody(BaseModel):
@@ -273,6 +281,14 @@ async def set_slug(request: Request, site_id: str, body: SlugBody, authorization
 async def set_live(request: Request, site_id: str, body: LiveBody, authorization: str | None = Header(None)):
     _check_origin(request)
     meta = await sites.set_live(site_id, _bearer(authorization), body.version, user=_current_user(request))
+    return {"site": meta}
+
+
+@app.post("/api/sites/{site_id}/versions/{n}/entry")
+async def set_entry(request: Request, site_id: str, n: int, body: EntryBody, authorization: str | None = Header(None)):
+    """Change the page a shared version opens on."""
+    _check_origin(request)
+    meta = await sites.set_entry(site_id, _bearer(authorization), n, body.entry, _current_user(request))
     return {"site": meta}
 
 
@@ -379,7 +395,9 @@ async def _locate(prefix: str, ref: str, path: str) -> Response | tuple[dict, st
     return version, path, digest
 
 
-async def _file_response(request: Request, ref: str, path: str, digest: str, transform=None) -> Response:
+async def _file_response(
+    request: Request, ref: str, path: str, digest: str, transform=None, fixed: bool = True
+) -> Response:
     # Files never change for a digest, so its hash is the ETag: a revisit gets a 304 instead of the file.
     # /r/ HTML also depends on the frame script, so its version is part of the tag.
     etag = f'"{digest}-{FRAME_VERSION}"' if transform else f'"{digest}"'
@@ -387,7 +405,8 @@ async def _file_response(request: Request, ref: str, path: str, digest: str, tra
         "Content-Security-Policy": SANDBOX_CSP,
         "Access-Control-Allow-Origin": "*",
         "X-Content-Type-Options": "nosniff",
-        "Cache-Control": "public, max-age=3600" if "@" in ref else "no-cache",
+        # a pinned version's files never change; its start page (fixed=False) can be changed by the owner
+        "Cache-Control": "public, max-age=3600" if "@" in ref and fixed else "no-cache",
         "ETag": etag,
     }
     if etag in [t.strip() for t in request.headers.get("if-none-match", "").split(",")]:
@@ -432,4 +451,4 @@ async def serve_frame(ref: str, path: str, request: Request):
         return found
     _, file_path, digest = found
     transform = (lambda data: frame_page(data, ref)) if _is_html(file_path) else None
-    return await _file_response(request, ref, file_path, digest, transform)
+    return await _file_response(request, ref, file_path, digest, transform, fixed=path != "")

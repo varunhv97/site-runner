@@ -192,13 +192,22 @@ def is_admin(user: dict | None) -> bool:
     return bool(user and user.get("email", "").lower() in admins)
 
 
-class Upload:
-    """A validated zip: path -> bytes, path -> digest, the entry page, total size and digest -> size."""
+def check_entry(paths, entry: str) -> str:
+    """A chosen start page: one of the version's .html files."""
+    entry = entry.strip().lstrip("/")
+    if entry not in paths or not entry.lower().endswith((".html", ".htm")):
+        raise SiteError("the start page must be one of the site's .html files", 400)
+    return entry
 
-    def __init__(self, zip_bytes: bytes):
+
+class Upload:
+    """A validated zip: path -> bytes, path -> digest, the entry page, total size and digest -> size.
+    entry: the start page the uploader picked, else the usual guess (index.html, then the shallowest page)."""
+
+    def __init__(self, zip_bytes: bytes, entry: str | None = None):
         self.files = extract_zip(zip_bytes)
         self.manifest = {path: hashlib.sha256(data).hexdigest() for path, data in self.files.items()}
-        self.entry = pick_entry(self.manifest)
+        self.entry = check_entry(self.manifest, entry) if entry else pick_entry(self.manifest)
         self.size = sum(len(b) for b in self.files.values())
         self.sizes = {self.manifest[path]: len(data) for path, data in self.files.items()}
 
@@ -468,12 +477,18 @@ class Sites:
         return n
 
     async def create(
-        self, name: str, zip_bytes: bytes, note: str = "", owner: dict | None = None, slug: str | None = None
+        self,
+        name: str,
+        zip_bytes: bytes,
+        note: str = "",
+        owner: dict | None = None,
+        slug: str | None = None,
+        entry: str | None = None,
     ) -> tuple[dict, str]:
         await self._ready()
         if slug and slug_problem(slug):
             raise SiteError(slug_problem(slug), 400)
-        upload = Upload(zip_bytes)
+        upload = Upload(zip_bytes, entry)
         await self._check_quota(owner["sub"] if owner else None, upload)
         await self._store_files(upload)
         token = secrets.token_urlsafe(24)
@@ -527,13 +542,19 @@ class Sites:
             return await self.public_meta(site_id, conn)
 
     async def add_version(
-        self, site_id: str, token: str | None, zip_bytes: bytes, note: str = "", user: dict | None = None
+        self,
+        site_id: str,
+        token: str | None,
+        zip_bytes: bytes,
+        note: str = "",
+        user: dict | None = None,
+        entry: str | None = None,
     ) -> dict:
         await self._ready()
         async with self.engine.connect() as conn:  # check access before spending storage on the upload
             site = await self._site(conn, site_id)
             self.check_access(site, token, user)
-        upload = Upload(zip_bytes)
+        upload = Upload(zip_bytes, entry)
         await self._check_quota(site.owner, upload)  # the owner's quota, also when a token holder publishes
         await self._store_files(upload)
         try:
@@ -564,6 +585,21 @@ class Sites:
             if not exists:
                 raise SiteError("no such version", 404)
             await conn.execute(update(sites).where(sites.c.id == site_id).values(live=n))
+            return await self.public_meta(site_id, conn)
+
+    async def set_entry(self, site_id: str, token: str | None, n: int, entry: str, user: dict | None = None) -> dict:
+        """Change which page a shared version opens on (its live and pinned links)."""
+        await self._ready()
+        async with self.engine.begin() as conn:
+            self.check_access(await self._site(conn, site_id, lock=True), token, user)
+            q = select(version_files.c.path).where(version_files.c.site_id == site_id, version_files.c.n == n)
+            paths = set((await conn.execute(q)).scalars())
+            if not paths:
+                raise SiteError("no such version", 404)
+            entry = check_entry(paths, entry)
+            await conn.execute(
+                update(versions).where(versions.c.site_id == site_id, versions.c.n == n).values(entry=entry)
+            )
             return await self.public_meta(site_id, conn)
 
     async def delete_version(self, site_id: str, token: str | None, n: int, user: dict | None = None) -> dict:

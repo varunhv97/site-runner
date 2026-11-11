@@ -22,6 +22,8 @@ export type DialogOptions = {
     normalize?: (value: string) => string;
     /** Checked as you type (debounced) and before confirming: an error message, or null when fine. */
     validate?: (value: string) => Promise<string | null>;
+    /** Pick one of these instead of typing (a dropdown). */
+    choices?: string[];
   };
 };
 
@@ -105,6 +107,15 @@ function AppDialog({ options, onDone }: { options: DialogOptions; onDone: (value
             <span>{input.label}</span>
             <span className={`app-dialog__control${error ? " has-error" : ""}`}>
               {input.prefix && <span className="app-dialog__prefix">{input.prefix}</span>}
+              {input.choices ? (
+                <select autoFocus value={value} onChange={(e) => setValue(e.target.value)}>
+                  {input.choices.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              ) : (
               <input
                 autoFocus
                 value={value}
@@ -115,6 +126,7 @@ function AppDialog({ options, onDone }: { options: DialogOptions; onDone: (value
                 onChange={(e) => setValue(input.normalize ? input.normalize(e.target.value) : e.target.value)}
                 onFocus={(e) => e.target.select()} // typing replaces the suggestion
               />
+              )}
             </span>
             <span id="app-dialog-error" className="app-dialog__error" role="status">
               {error ?? ""}

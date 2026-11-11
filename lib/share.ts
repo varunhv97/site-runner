@@ -74,6 +74,7 @@ export async function shareVersion(original: LocalSite, version: LocalVersion, s
   const form = new FormData();
   form.append("file", new Blob([zip as BlobPart], { type: "application/zip" }), "site.zip");
   form.append("note", version.note || `local v${version.n}`);
+  form.append("entry", version.entry); // the start page picked here, so shared links open the same page
 
   if (site.remote) {
     try {
@@ -212,3 +213,13 @@ export async function fetchUsage(): Promise<Usage | null> {
 }
 
 export const signInUrl = "/api/auth/login?next=/app";
+
+/** Change the page a shared version opens on. */
+export async function setRemoteEntry(site: LocalSite, remoteN: number, entry: string): Promise<void> {
+  if (!site.remote) return;
+  await callExisting(`/api/sites/${site.remote.siteId}/versions/${remoteN}/entry`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${site.remote.token}` },
+    body: JSON.stringify({ entry }),
+  });
+}

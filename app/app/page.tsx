@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fromDataTransfer, fromFileList, type FileMap } from "@/lib/ingest";
-import { addVersion, deleteSite, listSites, saveSite, type LocalSite } from "@/lib/localStore";
+import { fromDataTransfer, fromFileList, htmlFiles, needsStartPage, pickEntry, type FileMap } from "@/lib/ingest";
+import { addVersion, deleteSite, listSites, saveSite, setVersionEntry, type LocalSite } from "@/lib/localStore";
 import { useDialog } from "./AppDialog";
 import {
   deleteRemoteVersion,
@@ -12,6 +12,7 @@ import {
   checkSlug,
   normalizeSlug,
   rotateToken,
+  setRemoteEntry,
   setRemoteLive,
   setSlug,
   slugify,
@@ -152,6 +153,15 @@ export default function Home() {
     }
   }
 
+  // Which page opens first, when the files don't make it obvious (no index.html, several pages).
+  const askStartPage = (paths: string[], current: string) =>
+    ask({
+      title: "Pick the start page",
+      message: "There's no index.html, so choose the page the preview and share links open on.",
+      input: { label: "Start page", defaultValue: current, choices: htmlFiles(paths) },
+      confirmLabel: "Use this page",
+    });
+
   const onNewSite = async (files: FileMap) => {
     const name = await ask({
       title: "Name this site",
@@ -160,8 +170,15 @@ export default function Home() {
       confirmLabel: "Save site",
     });
     if (name === null) return;
+    const paths = Object.keys(files);
+    let start: string | undefined;
+    if (needsStartPage(paths)) {
+      const picked = await askStartPage(paths, pickEntry(paths)!);
+      if (picked === null) return;
+      start = picked;
+    }
     await run("Saving…", async () => {
-      const s = await addVersion(files, null, name);
+      const s = await addVersion(files, null, name, "", start);
       setPreviewN(1);
       await refresh(s.id);
     });
@@ -176,8 +193,16 @@ export default function Home() {
       confirmLabel: "Save version",
     });
     if (note === null) return;
+    const paths = Object.keys(files);
+    let start: string | undefined;
+    if (needsStartPage(paths)) {
+      const last = site.versions.at(-1)?.entry; // keep the previous start page when it's still there
+      const picked = await askStartPage(paths, last && paths.includes(last) ? last : pickEntry(paths)!);
+      if (picked === null) return;
+      start = picked;
+    }
     await run("Saving version…", async () => {
-      const s = await addVersion(files, site, site.name, note);
+      const s = await addVersion(files, site, site.name, note, start);
       setPreviewN(s.versions.length);
       await refresh(s.id);
     });
@@ -379,6 +404,26 @@ export default function Home() {
                           {new Date(v.createdAt).toLocaleString()} · {Object.keys(v.manifest).length} file{Object.keys(v.manifest).length === 1 ? "" : "s"} ·{" "}
                           {formatSize(v.size)}
                           {v.note && <div>{v.note}</div>}
+                          {htmlFiles(Object.keys(v.manifest)).length > 1 && (
+                            <div className="start-page">
+                              Opens on <code>{v.entry}</code>
+                              <button
+                                className="small"
+                                disabled={!!busy}
+                                onClick={async () => {
+                                  const picked = await askStartPage(Object.keys(v.manifest), v.entry);
+                                  if (picked === null || picked === v.entry) return;
+                                  await run("Changing the start page…", async () => {
+                                    const s = await setVersionEntry(site, v.n, picked);
+                                    if (remoteN !== undefined) await setRemoteEntry(s, remoteN, picked);
+                                    await refresh();
+                                  });
+                                }}
+                              >
+                                Change
+                              </button>
+                            </div>
+                          )}
                         </td>
                         <td className="actions">
                           <button className="small" onClick={() => setPreviewN(v.n)}>
@@ -476,7 +521,7 @@ export default function Home() {
                       Open in new tab ↗
                     </a>
                   </div>
-                  <iframe key={`${site.id}-${shownN}`} src={`/preview/${site.id}/${shownN}/`} title="preview" />
+                  <iframe key={`${site.id}-${shownN}-${site.versions.find((x) => x.n === shownN)?.entry}`} src={`/preview/${site.id}/${shownN}/`} title="preview" />
                 </div>
               )}
             </>

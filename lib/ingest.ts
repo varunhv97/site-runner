@@ -74,10 +74,19 @@ export async function fromDataTransfer(dt: DataTransfer): Promise<FileMap> {
   return stripCommonRoot(map);
 }
 
-export function pickEntry(paths: string[]): string | null {
-  if (paths.includes("index.html")) return "index.html";
-  const htmls = paths
+/** The site's HTML pages, shallowest first. */
+export function htmlFiles(paths: string[]): string[] {
+  return paths
     .filter((p) => /\.html?$/i.test(p))
     .sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
-  return htmls[0] ?? null;
+}
+
+export function pickEntry(paths: string[]): string | null {
+  if (paths.includes("index.html")) return "index.html";
+  return htmlFiles(paths)[0] ?? null;
+}
+
+/** No index.html and more than one page: ask which one opens first. */
+export function needsStartPage(paths: string[]): boolean {
+  return !paths.includes("index.html") && htmlFiles(paths).length > 1;
 }
