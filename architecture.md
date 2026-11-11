@@ -10,7 +10,9 @@ Browser ─┬─ public/index.html  landing page at / (static, taste-skill kit 
 
 Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · private Blob: files
               ├─ /api/sites ...        create / add version / set live / get meta
-              ├─ /s/<id>[@n]/<path>    serve shared files (sandbox CSP, CORS *)
+              ├─ /s/<id>[@n]/<path>    HTML: wrapper page (frames /r/, keeps localStorage); other files as-is
+              ├─ /r/<id>[@n]/<path>    shared files (sandbox CSP, CORS *); HTML gets the storage script
+              ├─ _core/frames.py       wrapper page + in-frame storage script
               ├─ _core/sites.py        zip validation, versions, access, limits, cleanup
               ├─ _core/db.py           SQLAlchemy tables; Postgres via DATABASE_URL, else SQLite (.data/)
               └─ _core/storage.py      LocalStorage (.data/) | BlobStorage (Vercel Blob REST)
@@ -24,10 +26,10 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
 - Checks: `node <skill>/scripts/gate.mjs public/index.html` (run from the project root).
 
 ## Routing
-- Dev: `next.config.ts` rewrites `/api/*` and `/s/*` → `127.0.0.1:8000`. There's an explicit trailing-slash rule
+- Dev: `next.config.ts` rewrites `/api/*`, `/s/*` and `/r/*` → `127.0.0.1:8000`. There's an explicit trailing-slash rule
   because `:path*` drops it. `skipTrailingSlashRedirect` stops Next stripping `/s/<id>/`.
 - Python deps: Vercel reads `pyproject.toml` `[project].dependencies` (not requirements.txt) when it exists. Keep both in sync.
-- Prod: `vercel.json` rewrites `/api/*` and `/s/*` → `api/index.py`. `api/_core` is underscore-prefixed so
+- Prod: `vercel.json` rewrites `/api/*`, `/s/*` and `/r/*` → `api/index.py`. `api/_core` is underscore-prefixed so
   Vercel doesn't treat it as functions.
 
 ## Sign-in (Google)
@@ -53,6 +55,16 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
 ## Local data (IndexedDB `site-runner` v1)
 - `sites` (keyPath id): LocalSite incl. `versions[].manifest` and optional `remote {siteId, token, url, live, pushed}`
 - `files` (key = sha256): Blob
+
+## Saved localStorage for shared sites (`_core/frames.py`)
+- `/s/` wrapper (our code, strict nonce CSP, `frame-src 'self'`) frames `/r/` (sandboxed, opaque origin).
+- `/r/` HTML = script that asks the wrapper for a seed, installs an in-memory `localStorage`, then
+  `document.write`s the original page. Writes are posted up; the wrapper stores them in its localStorage
+  under `sr-site-data:<site id>` (read-modify-write per message, so tabs merge per key).
+- Wrapper only accepts messages from its own frame with origin `null`; when framed itself it sends no data.
+- Frame reports path/hash/title; the wrapper mirrors them into its address bar (only under its own `/s/<ref>/`).
+- Links leaving the site get `target=_top` (`allow-top-navigation-by-user-activation`).
+- Tests: `tests/test_frames.py`. Browser behaviour was checked by hand in headless Chrome (see tasks.md).
 
 ## Path resolution (same in sw.js and index.py)
 `/` → entry (redirect if entry is in a subfolder) · `dir/` → `dir/index.html` · `dir` with `dir/index.html` → redirect to `dir/`.

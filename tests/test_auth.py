@@ -8,7 +8,7 @@ from _core import auth
 from _core.sites import Sites
 from _core.db import make_engine
 from _core.storage import LocalStorage
-from test_api import make_zip
+from test_api import make_zip, page
 
 BASE = "http://testserver"
 ALICE = {"sub": "111", "email": "alice@example.com", "name": "Alice"}
@@ -164,8 +164,8 @@ def test_link_names_are_unique_across_users(client, monkeypatch):
     r = share_named(client, "learn-sql")
     assert r.status_code == 200 and r.json()["url"] == f"{BASE}/s/learn-sql/"
     sid = r.json()["site"]["id"]
-    assert client.get("/s/learn-sql/").text == "v1"
-    assert client.get(f"/s/{sid}/").text == "v1"  # the random id keeps working
+    assert page(client, "/s/learn-sql/") == "v1"
+    assert page(client, f"/s/{sid}/") == "v1"  # the random id keeps working
     assert client.get("/api/slugs/learn-sql").json() == {"available": False, "reason": "That name is taken."}
 
     sign_in(client, monkeypatch, BOB)
@@ -182,10 +182,10 @@ def test_rename_keeps_old_links_and_never_frees_names(client, monkeypatch):
     client.post(f"/api/sites/{sid}/versions", files={"file": ("s.zip", make_zip({"index.html": "v2"}))})
     r = client.post(f"/api/sites/{sid}/slug", json={"slug": "ridge-loop"})
     assert r.status_code == 200 and r.json()["url"] == f"{BASE}/s/ridge-loop/"
-    assert client.get("/s/ridge-loop/").text == "v2"
+    assert page(client, "/s/ridge-loop/") == "v2"
     old = client.get("/s/trail-map@1/index.html", follow_redirects=False)
     assert old.status_code == 308 and old.headers["location"] == "/s/ridge-loop@1/index.html"
-    assert client.get("/s/trail-map@1/").text == "v1"  # following the redirect, pinned version kept
+    assert page(client, "/s/trail-map@1/") == "v1"  # following the redirect, pinned version kept
 
     client.delete(f"/api/sites/{sid}")
     sign_in(client, monkeypatch, BOB)
@@ -198,4 +198,4 @@ def test_link_names_cannot_shadow_ids(client, monkeypatch):
     sid = share(client).json()["site"]["id"]
     sign_in(client, monkeypatch, BOB)
     assert share_named(client, sid).status_code == 409  # someone's random id is not a free name
-    assert client.get(f"/s/{sid}/").text == "v1"
+    assert page(client, f"/s/{sid}/") == "v1"

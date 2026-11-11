@@ -1,4 +1,6 @@
 import io
+import json
+import re
 import zipfile
 
 import pytest
@@ -18,6 +20,13 @@ def make_zip(files: dict[str, str]) -> bytes:
     return buf.getvalue()
 
 
+def page(client, url: str) -> str:
+    """The HTML file a /s/ link shows: fetched from its /r/ frame, with the original page unwrapped."""
+    r = client.get(url.replace("/s/", "/r/", 1))
+    assert r.status_code == 200, r.text
+    return json.loads(re.search(r"const PAGE = (.*);\n", r.text).group(1))
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "sites", Sites(LocalStorage(str(tmp_path)), make_engine(f"sqlite:///{tmp_path}/t.db")))
@@ -35,9 +44,8 @@ def test_create_and_serve(client):
     sid = body["site"]["id"]
     assert body["url"].endswith(f"/s/{sid}/")
 
-    r = client.get(f"/s/{sid}/")
-    assert r.text == "<h1>v1</h1>"  # top-level folder stripped
-    assert "sandbox" in r.headers["content-security-policy"]
+    assert page(client, f"/s/{sid}/") == "<h1>v1</h1>"  # top-level folder stripped
+    assert "sandbox" in client.get(f"/r/{sid}/").headers["content-security-policy"]
     assert client.get(f"/s/{sid}/css/a.css").headers["content-type"].startswith("text/css")
     assert client.get(f"/s/{sid}/missing.js").status_code == 404
 
@@ -54,11 +62,11 @@ def test_versions_and_rollback(client):
         f"/api/sites/{sid}/versions", files={"file": ("s.zip", make_zip({"index.html": "v2"}))}, headers=auth
     )
     assert r.json()["site"]["live"] == 2
-    assert client.get(f"/s/{sid}/").text == "v2"
-    assert client.get(f"/s/{sid}@1/").text == "v1"
+    assert page(client, f"/s/{sid}/") == "v2"
+    assert page(client, f"/s/{sid}@1/") == "v1"
 
     client.post(f"/api/sites/{sid}/live", json={"version": 1}, headers=auth)
-    assert client.get(f"/s/{sid}/").text == "v1"
+    assert page(client, f"/s/{sid}/") == "v1"
     assert client.get(f"/s/{sid}@0/").status_code == 404
     assert client.get(f"/s/{sid}@9/").status_code == 404
 
@@ -98,7 +106,7 @@ def test_production_refuses_anonymous_shares(client, monkeypatch):
 def test_hidden_files_are_skipped(client):
     files = {"index.html": "ok", ".env": "SECRET=1", ".git/config": "[core]", "css/.DS_Store": "x", "css/a.css": "h1{}"}
     sid = create(client, files)["site"]["id"]
-    assert client.get(f"/s/{sid}/").text == "ok"
+    assert page(client, f"/s/{sid}/") == "ok"
     assert client.get(f"/s/{sid}/css/a.css").status_code == 200
     for hidden in (".env", ".git/config", "css/.DS_Store"):
         assert client.get(f"/s/{sid}/{hidden}").status_code == 404
@@ -123,7 +131,7 @@ def test_cleanup_deletes_only_unused_old_files(client, tmp_path, monkeypatch):
     assert client.get("/api/cron/cleanup", headers={"Authorization": "Bearer wrong"}).status_code == 401
     r = client.get("/api/cron/cleanup", headers={"Authorization": "Bearer s3cret"})
     assert r.status_code == 200 and r.json()["files_deleted"] == 2  # "gone" and "only-here.css"
-    assert client.get(f"/s/{keep}/").text == "kept"
+    assert page(client, f"/s/{keep}/") == "kept"
     assert (blobs / "fresh-upload").exists()
 
 

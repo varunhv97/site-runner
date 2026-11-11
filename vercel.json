@@ -7,6 +7,10 @@
     {
       "source": "/s/(.*)",
       "destination": "/api/index"
+    },
+    {
+      "source": "/r/(.*)",
+      "destination": "/api/index"
     }
   ],
   "headers": [

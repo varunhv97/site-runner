@@ -21,6 +21,10 @@
 
 - [x] GitHub repo (public) connected to Vercel: pushes to main deploy production
 
+- [x] Saved localStorage for shared sites (2026-11-10): `/s/` wrapper + sandboxed `/r/` frame, per-site store,
+  `tests/test_frames.py`; headless-Chrome e2e: progress survives closing the tab, sites isolated, framed-wrapper
+  attack gets no data (with and without X-Frame-Options)
+
 ## Next
 - [ ] Delete the old public store `site-runner-blob` in the dashboard (CLI needs an interactive confirm)
 - [ ] Disconnect Development from site-runner-db and site-runner-private (local dev uses SQLite + .data)
@@ -31,6 +35,7 @@
 - [ ] Report-abuse link and contact address
 - [ ] Production (`site-runner-omega.vercel.app`) is public and runs the first, broken build (API 500s). Don't `--prod` until safety items are done
 - [ ] MCP server (Python FastMCP): create_site, upload_version, list_versions, set_live, diff_versions
-- [ ] Serve shared content from a separate domain (stronger isolation, allows localStorage in shared sites)
+- [ ] Serve shared content from a separate domain (stronger isolation; would replace the localStorage bridge)
+- [ ] Bridge gaps: IndexedDB and cookies aren't saved; popups opened by a shared site get no saved storage
 - [ ] Local preview runs same-origin as the app. Use a separate preview origin to isolate untrusted zips
 - [ ] Larger uploads: client-direct Blob uploads to bypass the 4.5MB function limit

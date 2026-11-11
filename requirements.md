@@ -16,7 +16,9 @@ Keep **versions** of each site. Optionally **share** a version via a public link
 - **Local-first.** Nothing leaves the device until you click Share.
 - **Accounts only for sharing.** Sign in with Google to share; running locally needs no account. Edit tokens remain for API/MCP.
 - **Security.** Shared sites are served with `Content-Security-Policy: sandbox …` (opaque origin), so they
-  can't read this app's storage/cookies. Cost: shared sites can't use localStorage/cookies themselves.
+  can't read this app's storage/cookies. Cookies stay off for shared sites.
+- **Saved localStorage (free, no extra domains).** `/s/` HTML is a wrapper page that frames the sandboxed
+  `/r/` copy and keeps each site's localStorage under its site id (512K chars per site, per browser).
 - **Content-addressed files** (sha256), so unchanged files aren't duplicated across versions.
 - **Limits:** 4MB zipped per share (Vercel function body limit), 50MB unzipped, 2000 files.
 - Stack: Next.js 16 frontend + FastAPI (Vercel Python function), Vercel Blob storage in prod.

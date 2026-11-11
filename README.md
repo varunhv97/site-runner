@@ -12,7 +12,7 @@ Live at [spinsite.vercel.app](https://spinsite.vercel.app).
 - **Sign in with Google to share.** Owners publish, roll back, unpublish and replace edit tokens. Edit tokens
   also work for API and MCP clients.
 - **Sandboxed.** Shared pages run with `Content-Security-Policy: sandbox` (no origin of their own), so they
-  can't read the app's cookies or tokens.
+  can't read the app's cookies or tokens. Their localStorage is still saved, per site, by a small wrapper page.
 
 ## Stack
 

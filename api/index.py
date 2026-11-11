@@ -16,6 +16,7 @@ from pydantic import BaseModel  # noqa: E402
 from sqlalchemy.exc import OperationalError  # noqa: E402
 
 from _core import auth  # noqa: E402
+from _core.frames import frame_page, wrapper_page  # noqa: E402
 from _core.db import make_engine  # noqa: E402
 from _core.sites import SiteError, Sites, content_type  # noqa: E402
 from _core.storage import StorageError, make_storage, oidc_token  # noqa: E402
@@ -35,7 +36,12 @@ async def remember_oidc_token(request: Request, call_next):
 
 
 # Shared content runs with an opaque origin: it can't read this app's cookies/storage.
-SANDBOX_CSP = "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock"
+# Top navigation (on a click only) lets links leave the /s/ wrapper's frame, as they would at top level.
+SANDBOX_FLAGS = (
+    "allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock "
+    "allow-top-navigation-by-user-activation"
+)
+SANDBOX_CSP = f"sandbox {SANDBOX_FLAGS}"
 
 
 @app.exception_handler(SiteError)
@@ -310,14 +316,19 @@ def _not_found() -> Response:
     return Response("<h1>404</h1><p>Not found in this site.</p>", 404, media_type="text/html")
 
 
+def _is_html(path: str) -> bool:
+    return content_type(path).startswith("text/html")
+
+
 @app.api_route("/s/{ref}", methods=["GET", "HEAD"])
+@app.api_route("/r/{ref}", methods=["GET", "HEAD"])
 async def serve_root_redirect(ref: str, request: Request):
     q = f"?{request.url.query}" if request.url.query else ""
-    return RedirectResponse(f"/s/{ref}/{q}", status_code=308)
+    return RedirectResponse(f"{request.url.path}/{q}", status_code=308)
 
 
-@app.api_route("/s/{ref}/{path:path}", methods=["GET", "HEAD"])
-async def serve(ref: str, path: str):
+async def _locate(prefix: str, ref: str, path: str) -> Response | tuple[dict, str, str]:
+    """Resolve a shared-site path to (version, file path, digest), or a redirect / 404 response."""
     site_id, _, vstr = ref.partition("@")
     pinned = bool(vstr)
     try:
@@ -331,10 +342,9 @@ async def serve(ref: str, path: str):
     if version["via_slug"] and version["current_slug"] != version["via_slug"]:
         # an earlier link name of a renamed site: forward to the current one, keeping the version and path
         target = version["current_slug"] + (f"@{vstr}" if pinned else "")
-        return RedirectResponse(f"/s/{target}/{path}", status_code=308)
-    site_id = version["site_id"]
+        return RedirectResponse(f"{prefix}{target}/{path}", status_code=308)
 
-    base = f"/s/{ref}/"
+    base = f"{prefix}{ref}/"
     if path == "":
         if "/" in version["entry"]:
             return RedirectResponse(base + version["entry"], status_code=307)
@@ -342,22 +352,62 @@ async def serve(ref: str, path: str):
     elif path.endswith("/"):
         path += "index.html"
 
-    digest = await sites.file_digest(site_id, version["n"], path)
+    digest = await sites.file_digest(version["site_id"], version["n"], path)
     if digest is None:
-        if await sites.file_digest(site_id, version["n"], f"{path}/index.html"):
+        if await sites.file_digest(version["site_id"], version["n"], f"{path}/index.html"):
             return RedirectResponse(f"{base}{path}/", status_code=308)
         return _not_found()
+    return version, path, digest
 
+
+async def _file_response(ref: str, path: str, digest: str, transform=None) -> Response:
     data = await sites.read_blob(digest)
     if data is None:
         return _not_found()
     return Response(
-        data,
+        transform(data) if transform else data,
         media_type=content_type(path),
         headers={
             "Content-Security-Policy": SANDBOX_CSP,
             "Access-Control-Allow-Origin": "*",
             "X-Content-Type-Options": "nosniff",
-            "Cache-Control": "public, max-age=3600" if pinned else "no-cache",
+            "Cache-Control": "public, max-age=3600" if "@" in ref else "no-cache",
         },
     )
+
+
+@app.api_route("/s/{ref}/{path:path}", methods=["GET", "HEAD"])
+async def serve(ref: str, path: str):
+    """HTML pages get the wrapper that saves the site's localStorage; other files are served as-is."""
+    found = await _locate("/s/", ref, path)
+    if isinstance(found, Response):
+        return found
+    version, file_path, digest = found
+    if not _is_html(file_path):
+        return await _file_response(ref, file_path, digest)
+    html, nonce = wrapper_page(version["site_id"], ref, path, SANDBOX_FLAGS)
+    return Response(
+        html,
+        media_type="text/html; charset=utf-8",
+        headers={
+            # our code only: the shared site itself runs in the sandboxed /r/ frame
+            "Content-Security-Policy": (
+                f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'; "
+                "frame-src 'self'; base-uri 'none'; form-action 'none'"
+            ),
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
+@app.api_route("/r/{ref}/{path:path}", methods=["GET", "HEAD"])
+async def serve_frame(ref: str, path: str):
+    """What the /s/ wrapper frames: the site's files, sandboxed, with the storage script in HTML pages."""
+    found = await _locate("/r/", ref, path)
+    if isinstance(found, Response):
+        return found
+    _, file_path, digest = found
+    transform = (lambda data: frame_page(data, ref)) if _is_html(file_path) else None
+    return await _file_response(ref, file_path, digest, transform)

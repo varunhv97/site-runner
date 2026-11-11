@@ -18,6 +18,8 @@ const nextConfig: NextConfig = {
       // :path* drops the trailing slash, so match slash-terminated paths explicitly first.
       { source: "/s/:path*/", destination: `${API}/s/:path*/` },
       { source: "/s/:path*", destination: `${API}/s/:path*` },
+      { source: "/r/:path*/", destination: `${API}/r/:path*/` },
+      { source: "/r/:path*", destination: `${API}/r/:path*` },
     ];
   },
 };
