@@ -94,10 +94,18 @@ def _ref(meta: dict) -> str:
     return meta.get("slug") or meta["id"]
 
 
+def _secure(request: Request) -> bool:
+    return _base_url(request).startswith("https://")
+
+
+def _cookie(request: Request, name: str) -> str:
+    return auth.cookie_name(name, _secure(request))
+
+
 def _current_user(request: Request) -> dict | None:
     if not auth.enabled():
         return None
-    return auth.verify(request.cookies.get(auth.SESSION_COOKIE))
+    return auth.verify(request.cookies.get(_cookie(request, auth.SESSION_COOKIE)))
 
 
 def _check_origin(request: Request) -> None:
@@ -137,20 +145,20 @@ async def login(request: Request, next: str = "/app"):
     state, cookie = auth.new_state(next)
     res = RedirectResponse(auth.login_url(state, f"{_base_url(request)}/api/auth/callback"), status_code=302)
     res.set_cookie(
-        auth.STATE_COOKIE,
+        _cookie(request, auth.STATE_COOKIE),
         cookie,
         max_age=auth.STATE_TTL,
         httponly=True,
-        secure=_base_url(request).startswith("https"),
+        secure=_secure(request),
         samesite="lax",
-        path="/api/auth",
+        path="/",  # __Host- cookies must use Path=/
     )
     return res
 
 
 @app.get("/api/auth/callback")
 async def callback(request: Request, code: str = "", state: str = "", error: str = ""):
-    saved = auth.verify(request.cookies.get(auth.STATE_COOKIE))
+    saved = auth.verify(request.cookies.get(_cookie(request, auth.STATE_COOKIE)))
     if error or not code or not saved or not state or saved.get("state") != state:
         return RedirectResponse("/app?signin=failed", status_code=302)
     try:
@@ -159,13 +167,17 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         return RedirectResponse("/app?signin=failed", status_code=302)
     await sites.touch_user(user)
     res = RedirectResponse(saved["next"], status_code=302)
-    res.delete_cookie(auth.STATE_COOKIE, path="/api/auth")
+    secure = _secure(request)
+    res.delete_cookie(_cookie(request, auth.STATE_COOKIE), path="/", secure=secure, httponly=True)
+    if secure:  # the cookies' names before the __Host- prefix
+        res.delete_cookie(auth.SESSION_COOKIE, path="/")
+        res.delete_cookie(auth.STATE_COOKIE, path="/api/auth")
     res.set_cookie(
-        auth.SESSION_COOKIE,
+        _cookie(request, auth.SESSION_COOKIE),
         auth.session_value(user),
         max_age=auth.SESSION_TTL,
         httponly=True,
-        secure=_base_url(request).startswith("https"),
+        secure=secure,
         samesite="lax",
         path="/",
     )
@@ -176,7 +188,7 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
 async def logout(request: Request):
     _check_origin(request)
     res = JSONResponse({"ok": True})
-    res.delete_cookie(auth.SESSION_COOKIE, path="/")
+    res.delete_cookie(_cookie(request, auth.SESSION_COOKIE), path="/", secure=_secure(request), httponly=True)
     return res
 
 
