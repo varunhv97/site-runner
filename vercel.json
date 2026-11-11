@@ -1,14 +1,14 @@
 {
   "redirects": [
     {
-      "source": "/:path*",
+      "source": "/(.*)",
       "has": [
         {
           "type": "host",
           "value": "www.spinsite.app"
         }
       ],
-      "destination": "https://spinsite.app/:path*",
+      "destination": "https://spinsite.app/$1",
       "permanent": true
     }
   ],
