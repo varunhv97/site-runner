@@ -6,19 +6,20 @@ Keep **versions** of each site. Optionally **share** a version via a public link
 
 ## Features
 - Drop/pick files, folders, or zips; unzip client-side; strip a single wrapping folder.
-- Local preview served by a Service Worker from IndexedDB, so relative links/assets work.
+- Local preview on its own origin (`p-<id>.sites.spinsite.app`): /app hands the files to a service worker there
+  by postMessage, so relative links/assets work and the preview can't touch the app.
 - Version history per site; preview any version.
 - Share: first share creates a remote site + secret **edit token**; later versions "Publish" to it.
 - Live link `/s/<id>/` follows the live version; `/s/<id>@<n>/` pins a version. "Make live" = rollback/promote.
+  Both redirect to the site's own host: `<id>.sites.spinsite.app/` and `/@<n>/`.
 - (Planned) MCP server so agents can publish/rollback with the edit token.
 
 ## Key decisions
 - **Local-first.** Nothing leaves the device until you click Share.
 - **Accounts only for sharing.** Sign in with Google to share; running locally needs no account. Edit tokens remain for API/MCP.
-- **Security.** Shared sites are served with `Content-Security-Policy: sandbox …` (opaque origin), so they
-  can't read this app's storage/cookies. Cookies stay off for shared sites.
-- **Saved localStorage (free, no extra domains).** `/s/` HTML is a wrapper page that frames the sandboxed
-  `/r/` copy and keeps each site's localStorage under its site id (512K chars per site, per browser).
+- **Security.** The app origin never runs user HTML. Each shared site and each local preview gets its own
+  origin under `sites.spinsite.app` (sandbox CSP with allow-same-origin, no server cookies), so it can't read
+  the app's storage, cookies or tokens, and real localStorage/IndexedDB/cookies work per site.
 - **Content-addressed files** (sha256), so unchanged files aren't duplicated across versions.
 - **Limits:** 4MB zipped per share (Vercel function body limit), 50MB unzipped, 2000 files; 250MB storage per
   account (`STORAGE_QUOTA_MB`; a file shared by many versions counts once). Shared versions that aren't live can be

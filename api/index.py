@@ -153,8 +153,9 @@ def _content_config() -> dict:
 
 
 def _check_origin(request: Request) -> None:
-    """Browser writes must come from this app. Shared sites run with an opaque origin and send
-    "Origin: null", so they can never act with the visitor's session. API and MCP clients send no Origin."""
+    """Browser writes must come from this app's exact origin. Shared sites and previews run on subdomains of the
+    content domain (same-site with the app until it's on the Public Suffix List, so the browser does send the
+    session cookie): their Origin is their own, so they are refused. API and MCP clients send no Origin."""
     origin = request.headers.get("origin")
     if origin is not None and origin != _base_url(request):
         raise SiteError("request from another origin", 403)

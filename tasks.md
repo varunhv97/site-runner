@@ -38,9 +38,16 @@
 - [x] "Shared from your account" in /app (2026-11-11): lists the account's shared sites missing from this browser;
   Open here downloads the live version and links it, so publishing updates the same link
 
+- [x] User content on its own origins (2026-11-11): shared sites on `<id>.sites.spinsite.app` (live `/`,
+  pinned `/@n/`), previews on `p-<local id>.sites.spinsite.app` via a postMessage hand-off + service worker;
+  `/s/` and `/r/` 308 there; localStorage bridge removed; `__Host-` cookies; `tests/test_content.py`,
+  `tests/path_rules.json` (+ node test); headless-Chrome checks (preview frame + new tab, malicious preview gets
+  no tokens/API, sites isolated, storage persists, /s/ redirect)
+
 ## Next
-- [ ] **HIGH PRIORITY:** serve local previews from a separate origin. Today a malicious zip previewed locally
-  runs same-origin as the app and can read the edit tokens in IndexedDB
+- [ ] Deploy the content origin: DNS + second Vercel project (docs/deploying.md), then check a live share link
+- [ ] Submit sites.spinsite.app to the Public Suffix List (until then sites are same-site with each other and the app)
+- [ ] Register sites.spinsite.app in Google Search Console (to see and act on abuse/phishing reports quickly)
 - [ ] Delete the old public store `site-runner-blob` in the dashboard (CLI needs an interactive confirm)
 - [ ] Disconnect Development from site-runner-db and site-runner-private (local dev uses SQLite + .data)
 - [ ] Optional: a Neon `dev` branch for testing against real Postgres
@@ -48,6 +55,4 @@
 - [ ] Pre-share warning + secret scan (API keys in JS); optional expiry for old shares
 - [ ] Report-abuse link and contact address
 - [ ] MCP server (Python FastMCP): create_site, upload_version, list_versions, set_live, diff_versions
-- [ ] Serve shared content from a separate domain (stronger isolation; would replace the localStorage bridge)
-- [ ] Bridge gaps: IndexedDB and cookies aren't saved; popups opened by a shared site get no saved storage
 - [ ] Larger uploads: client-direct Blob uploads to bypass the 4.5MB function limit
