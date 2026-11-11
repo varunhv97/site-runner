@@ -393,7 +393,7 @@ async def serve(ref: str, path: str):
             # our code only: the shared site itself runs in the sandboxed /r/ frame
             "Content-Security-Policy": (
                 f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'; "
-                "frame-src 'self'; base-uri 'none'; form-action 'none'"
+                "frame-src 'self'; img-src 'self' https: data:; base-uri 'none'; form-action 'none'"
             ),
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "strict-origin-when-cross-origin",

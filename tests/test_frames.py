@@ -15,6 +15,7 @@ def test_html_gets_wrapper_with_strict_csp(client):
     nonce = re.search(r"'nonce-([^']+)'", csp).group(1)
     assert f'<script nonce="{nonce}">' in r.text
     assert "unsafe-inline" not in csp and "sandbox" not in csp  # our code, on this app's origin
+    assert "img-src 'self' https: data:" in csp  # the site's own tab icon, carried up from the frame
     assert "secret-marker" not in r.text  # the site's content never enters the wrapper
     assert config(r.text) == {
         "site": sid,
@@ -22,6 +23,7 @@ def test_html_gets_wrapper_with_strict_csp(client):
         "frameBase": f"/r/{sid}/",
         "frame": f"/r/{sid}/",
         "limit": 512 * 1024,
+        "total": 2 * 1024 * 1024,
     }
     assert client.get(f"/s/{sid}/").headers["content-security-policy"] != csp  # a fresh nonce each time
 

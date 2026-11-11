@@ -60,7 +60,8 @@ Vercel ─── api/index.py (FastAPI)  ── Postgres (Neon): metadata · pri
 - `/s/` wrapper (our code, strict nonce CSP, `frame-src 'self'`) frames `/r/` (sandboxed, opaque origin).
 - `/r/` HTML = script that asks the wrapper for a seed, installs an in-memory `localStorage`, then
   `document.write`s the original page. Writes are posted up; the wrapper stores them in its localStorage
-  under `sr-site-data:<site id>` (read-modify-write per message, so tabs merge per key).
+  under `sr-site-data:<site id>` (read-modify-write per message, so tabs merge per key). Caps: 512K chars a
+  site, 2M chars for all sites together.
 - Wrapper only accepts messages from its own frame with origin `null`; when framed itself it sends no data.
 - Frame reports path/hash/title; the wrapper mirrors them into its address bar (only under its own `/s/<ref>/`).
 - Links leaving the site get `target=_top` (`allow-top-navigation-by-user-activation`).

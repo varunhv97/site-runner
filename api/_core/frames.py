@@ -12,13 +12,16 @@ Rules (tested in tests/test_frames.py and by hand in headless Chrome):
 - A framed wrapper (window.top !== window) never sends data: a page that frames it could otherwise
   navigate the inner frame to its own sandboxed page and ask for the seed.
 - Saved data only ever reaches the sandboxed frame, never the wrapper's own document.
-- Each site is capped at STORE_LIMIT characters, so one site can't fill the shared quota.
+- Each site is capped at STORE_LIMIT characters, and all sites together at STORE_TOTAL_LIMIT, so shared
+  sites can't fill the app origin's quota.
 """
 
 import json
 import secrets
 
 STORE_LIMIT = 512 * 1024  # characters (keys + values), the same unit browsers count in
+# All shared sites together, so between them they can't fill this app's own localStorage (~5M characters).
+STORE_TOTAL_LIMIT = 2 * 1024 * 1024
 
 
 def _js(value) -> str:
@@ -43,12 +46,26 @@ _WRAPPER_JS = r"""
   };
   const size = (d) => Object.entries(d).reduce((n, [k, v]) => n + k.length + v.length, 0);
   // Read, change, write on every message, so two open tabs merge per key like real localStorage.
+  // Characters every other shared site keeps in this origin's localStorage.
+  const others = () => {
+    let n = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("sr-site-data:") && k !== KEY) n += k.length + (localStorage.getItem(k) || "").length;
+    }
+    return n;
+  };
   const write = (change) => {
     const d = load();
     change(d);
     if (size(d) > C.limit) return;
     try {
-      localStorage.setItem(KEY, JSON.stringify(d));
+      const json = JSON.stringify(d);
+      if (others() + KEY.length + json.length > C.total) {
+        console.warn("Shared sites' saved data is full in this browser; this change wasn't saved.");
+        return;
+      }
+      localStorage.setItem(KEY, json);
     } catch {
       /* storage unavailable or full: the site keeps working, it just won't persist */
     }
@@ -73,6 +90,16 @@ _WRAPPER_JS = r"""
         history.replaceState(null, "", C.base + u.pathname.slice(C.frameBase.length) + u.search + m.hash);
       }
       if (typeof m.title === "string") document.title = m.title.slice(0, 200) || "Shared site";
+      // The tab shows the top page's icon, so carry the site's own icon up (web or data: images only).
+      if (typeof m.icon === "string" && m.icon.length < 65536 && /^(https?:|data:image\/)/i.test(m.icon)) {
+        let link = document.querySelector("link[rel='icon']");
+        if (!link) {
+          link = document.createElement("link");
+          link.rel = "icon";
+          document.head.appendChild(link);
+        }
+        if (link.href !== m.icon) link.href = m.icon;
+      }
     }
   });
   // Someone edited the #hash in the address bar: pass it down.
@@ -153,7 +180,14 @@ _FRAME_JS = r"""
   }
 
   function report() {
-    send({ sr: "nav", path: location.pathname + location.search, hash: location.hash, title: document.title });
+    const icon = document.querySelector("link[rel~='icon']");
+    send({
+      sr: "nav",
+      path: location.pathname + location.search,
+      hash: location.hash,
+      title: document.title,
+      icon: icon ? icon.href : "",
+    });
   }
 
   function start(data) {
@@ -219,6 +253,7 @@ def wrapper_page(site_id: str, ref: str, path: str, sandbox: str) -> tuple[bytes
         "frameBase": f"/r/{ref}/",
         "frame": f"/r/{ref}/{path}",
         "limit": STORE_LIMIT,
+        "total": STORE_TOTAL_LIMIT,
     }
     html = (
         _WRAPPER_HTML.replace("__NONCE__", nonce)
