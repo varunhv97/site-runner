@@ -17,6 +17,7 @@ development (it's loaded by `npm run dev:api`), and set the same names in Vercel
 | `BLOB_ACCESS` | `private` (default) or `public`, matching the store |
 | `CRON_SECRET` | Guards the daily cleanup job (`/api/cron/cleanup`, scheduled in `vercel.json`) |
 | `STORAGE_QUOTA_MB` | Storage per account in MB (may be fractional). Default 250 |
+| `GLOBAL_STORAGE_LIMIT_MB` | Storage for all accounts together, in MB. Uploads past it are refused (507); past 80%, `REPORT_EMAIL` gets one email a day. Default 900 (under Vercel Blob's Hobby storage) |
 | `UPLOAD_SCAN` | `on` (default) or `off`: the phishing/seed-phrase/miner scan that holds sites for review. Executables are always refused |
 | `PUBLIC_BASE_URL` | The app's origin, e.g. `https://spinsite.app`: share links, sign-in, the origin check, and the only origin preview pages talk to. Required in production. Locally: the request's host (`http://localhost:3000` for previews) |
 | `USERCONTENT_BASE_DOMAIN` | Where user content is served: `<link name, else site id>.<domain>` and `p-<local id>.<domain>`, e.g. `sites.spinsite.app`. Must not be the app's host or a parent of it. Served over https, except `*.localhost` (http, local dev). Required in production. Locally: `usercontent.localhost:8001` |

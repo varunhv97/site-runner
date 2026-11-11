@@ -314,3 +314,20 @@ def test_something_else_needs_details(client, monkeypatch):
     r = report(client, f"{BASE}/s/{sid}/", "other")
     assert r.status_code == 400 and "details" in r.json()["error"]
     assert report(client, f"{BASE}/s/{sid}/", "other", details="Impersonates my business").status_code == 200
+
+
+def test_report_emails_are_capped(client, monkeypatch, sent):
+    sign_in(client, monkeypatch, ALICE)
+    one, two, three = (share(client).json()["site"]["id"] for _ in range(3))
+    client.cookies.clear()
+    assert report(client, f"{BASE}/s/{one}/").status_code == 200
+    assert report(client, f"{BASE}/s/{one}/").status_code == 200  # same site, same hour: stored, not emailed
+    assert len(sent) == 1
+
+    monkeypatch.setattr(abuse, "REPORT_EMAILS_PER_DAY", 2)
+    assert report(client, f"{BASE}/s/{two}/").status_code == 200  # the 2nd and last email today
+    assert "last report email today" in sent[-1]["text"]
+    assert report(client, f"{BASE}/s/{three}/").status_code == 200  # over the daily cap: stored only
+    assert len(sent) == 2
+    as_admin(client, monkeypatch)
+    assert len(open_reports(client)) == 4  # every report is in /admin either way

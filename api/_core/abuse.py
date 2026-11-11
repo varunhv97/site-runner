@@ -25,6 +25,9 @@ MAX_BAN_REASON = 500
 # Reports per client IP per hour (fixed window, counted in rate_limits). Anyone can report, so this keeps
 # one source from flooding the queue. Requests that fail the cheap format checks aren't counted.
 REPORTS_PER_HOUR = 10
+# Report emails: one per site per hour (a flood about one site is one email) and REPORT_EMAILS_PER_DAY in all,
+# under Resend's free 100 a day. Past either, reports are still stored for /admin; only the email is skipped.
+REPORT_EMAILS_PER_DAY = 40
 LIST_LIMIT = 200
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 DEFAULT_CONTACT = "https://github.com/varunhv97/site-runner/issues"
@@ -101,6 +104,16 @@ async def _hit_rate_limit(sites, conn, key: str, limit: int) -> None:
         raise SiteError("Too many reports from your network. Try again in an hour.", 429)
 
 
+async def _bump(sites, key: str, window: str) -> int:
+    """Count one more in (key, window) and return the new count (never refuses)."""
+    async with sites.engine.begin() as conn:
+        stmt = sites._upsert(rate_limits).values(key=key[:300], window=window, count=1)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["key", "window"], set_={"count": rate_limits.c.count + 1}
+        ).returning(rate_limits.c.count)
+        return (await conn.execute(stmt)).scalar_one()
+
+
 async def prune_rate_limits(sites) -> int:
     """Drop counters of past windows (called by the daily cleanup cron)."""
     await sites._ready()
@@ -158,15 +171,20 @@ async def create_report(
                 .where(sites_t.c.id == site_id)
             )
         ).scalar()
-    emailed = await _notify(row, site_id, slug, owner, url.strip(), reason, details, contact, user, base_url)
+    emailed = await _notify(sites, row, site_id, slug, owner, url.strip(), reason, details, contact, user, base_url)
     return {"id": row, "site_id": site_id, "emailed": emailed}
 
 
-async def _notify(report_id, site_id, slug, owner, url, reason, details, contact, user, base_url) -> bool:
+async def _notify(sites, report_id, site_id, slug, owner, url, reason, details, contact, user, base_url) -> bool:
     """Email REPORT_EMAIL about a new report (mailer.py; off without RESEND_API_KEY). The report is already
-    stored, so a failed email only costs the instant notice: it's still in /admin."""
+    stored, so a skipped or failed email only costs the instant notice: it's still in /admin."""
     to = os.environ.get("REPORT_EMAIL", "").strip()
     if not to or not mailer.enabled():
+        return False
+    if await _bump(sites, f"report-email-site:{site_id}", _window()) > 1:
+        return False  # this site was already emailed about this hour
+    sent_today = await _bump(sites, "report-emails", time.strftime("%Y-%m-%d", time.gmtime()))
+    if sent_today > REPORT_EMAILS_PER_DAY:
         return False
     name = slug or site_id
     lines = [
@@ -181,6 +199,11 @@ async def _notify(report_id, site_id, slug, owner, url, reason, details, contact
         "",
         f"Review it, unpublish the site or ban the owner at {base_url}/admin (report #{report_id}).",
     ]
+    if sent_today == REPORT_EMAILS_PER_DAY:
+        lines += [
+            "",
+            f"This is the last report email today ({REPORT_EMAILS_PER_DAY}): later reports are only in /admin.",
+        ]
     subject = f"[Site Runner] {REASON_LABELS.get(reason, reason)} report: {name}"
     return await mailer.send(to, subject, "\n".join(lines), reply_to=contact or None)
 

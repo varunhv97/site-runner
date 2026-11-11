@@ -473,6 +473,9 @@ class Sites:
     async def _check_quota(self, owner: str | None, upload: Upload) -> None:
         """Refuse an upload whose new files would take the owner's account over its storage quota.
         Sites without an owner (token-only, local dev without sign-in) aren't checked."""
+        from . import capacity  # here, not at the top: capacity imports this module
+
+        await capacity.check(self, upload.sizes)  # the site-wide cap first, for every upload
         if not owner:
             return
         owned = await self._owned_blob_sizes(owner)

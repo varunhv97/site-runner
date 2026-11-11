@@ -28,6 +28,9 @@ illegal, report it at https://spinsite.app/report (or the "Report abuse" link in
 - Content responses carry a sandbox CSP, `Origin-Agent-Cluster: ?1` and `nosniff`. The server never sets or reads
   cookies on content hosts, and app routes don't exist there. Service workers are refused on shared sites, so a
   takedown can't be outlived by a cached worker.
+- The app's pages (`spinsite.app`) send a Content-Security-Policy that limits scripts, styles and fonts to the app
+  (plus Google Fonts) and blocks requests, images, frames and forms to other origins (previews excepted), so
+  injected script couldn't load code or send data elsewhere.
 - App cookies are `__Host-` cookies (no subdomain can set them). Every browser write to the API must send
   `Origin: https://spinsite.app` exactly; content origins are refused.
 - Local previews get their files from /app by `postMessage`, checked by exact origin and window both ways.

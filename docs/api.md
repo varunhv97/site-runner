@@ -78,6 +78,7 @@ Admins are the `ADMIN_EMAILS` accounts (signed in).
   `details` up to 2,000 characters (required for `other`); `contact` an optional email.
 - Each report is stored for `/admin` and, when `REPORT_EMAIL` and `RESEND_API_KEY` are set, emailed there with
   the site, its owner and the details (reply-to: the reporter's contact). A failed email never loses a report.
+  At most one email per site per hour and 40 a day (the 40th says so); past that, reports are only in `/admin`.
 - Admins are the `ADMIN_EMAILS`. An admin's `DELETE /api/sites/<id>` marks the site's open reports actioned.
 - A banned account gets 403 on every share write (create, publish, live, start page, link name, token, claim),
   and so does an edit token for a banned owner's site. Banning unpublishes the account's sites; unbanning
@@ -113,5 +114,5 @@ and sends its choice with every share.
 - **Reserved names:** a top-level folder or file named `@` plus digits (e.g. `@3/`) is refused: `/@3/` opens version 3.
 
 Errors come back as `{"error": "..."}` with a matching status: 401/403 for auth, 404, 409 (e.g. deleting the
-live version), 413 (too big or over quota), 429 (a limit reached, e.g. too many reports) and 451 on a
+live version), 413 (too big or over quota), 507 (Site Runner's storage is full), 429 (a limit reached, e.g. too many reports) and 451 on a
 held site's links.
