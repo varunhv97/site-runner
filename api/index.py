@@ -16,7 +16,7 @@ from pydantic import BaseModel  # noqa: E402
 from sqlalchemy.exc import OperationalError  # noqa: E402
 
 from _core import auth  # noqa: E402
-from _core.frames import frame_page, wrapper_page  # noqa: E402
+from _core.frames import FRAME_VERSION, frame_page, wrapper_page  # noqa: E402
 from _core.db import make_engine  # noqa: E402
 from _core.sites import SiteError, Sites, content_type  # noqa: E402
 from _core.storage import StorageError, make_storage, oidc_token  # noqa: E402
@@ -379,31 +379,34 @@ async def _locate(prefix: str, ref: str, path: str) -> Response | tuple[dict, st
     return version, path, digest
 
 
-async def _file_response(ref: str, path: str, digest: str, transform=None) -> Response:
+async def _file_response(request: Request, ref: str, path: str, digest: str, transform=None) -> Response:
+    # Files never change for a digest, so its hash is the ETag: a revisit gets a 304 instead of the file.
+    # /r/ HTML also depends on the frame script, so its version is part of the tag.
+    etag = f'"{digest}-{FRAME_VERSION}"' if transform else f'"{digest}"'
+    headers = {
+        "Content-Security-Policy": SANDBOX_CSP,
+        "Access-Control-Allow-Origin": "*",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "public, max-age=3600" if "@" in ref else "no-cache",
+        "ETag": etag,
+    }
+    if etag in [t.strip() for t in request.headers.get("if-none-match", "").split(",")]:
+        return Response(status_code=304, headers=headers)
     data = await sites.read_blob(digest)
     if data is None:
         return _not_found()
-    return Response(
-        transform(data) if transform else data,
-        media_type=content_type(path),
-        headers={
-            "Content-Security-Policy": SANDBOX_CSP,
-            "Access-Control-Allow-Origin": "*",
-            "X-Content-Type-Options": "nosniff",
-            "Cache-Control": "public, max-age=3600" if "@" in ref else "no-cache",
-        },
-    )
+    return Response(transform(data) if transform else data, media_type=content_type(path), headers=headers)
 
 
 @app.api_route("/s/{ref}/{path:path}", methods=["GET", "HEAD"])
-async def serve(ref: str, path: str):
+async def serve(ref: str, path: str, request: Request):
     """HTML pages get the wrapper that saves the site's localStorage; other files are served as-is."""
     found = await _locate("/s/", ref, path)
     if isinstance(found, Response):
         return found
     version, file_path, digest = found
     if not _is_html(file_path):
-        return await _file_response(ref, file_path, digest)
+        return await _file_response(request, ref, file_path, digest)
     html, nonce = wrapper_page(version["site_id"], ref, path, SANDBOX_FLAGS)
     return Response(
         html,
@@ -422,11 +425,11 @@ async def serve(ref: str, path: str):
 
 
 @app.api_route("/r/{ref}/{path:path}", methods=["GET", "HEAD"])
-async def serve_frame(ref: str, path: str):
+async def serve_frame(ref: str, path: str, request: Request):
     """What the /s/ wrapper frames: the site's files, sandboxed, with the storage script in HTML pages."""
     found = await _locate("/r/", ref, path)
     if isinstance(found, Response):
         return found
     _, file_path, digest = found
     transform = (lambda data: frame_page(data, ref)) if _is_html(file_path) else None
-    return await _file_response(ref, file_path, digest, transform)
+    return await _file_response(request, ref, file_path, digest, transform)

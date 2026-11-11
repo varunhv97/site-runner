@@ -16,6 +16,7 @@ Rules (tested in tests/test_frames.py and by hand in headless Chrome):
   sites can't fill the app origin's quota.
 """
 
+import hashlib
 import json
 import secrets
 
@@ -203,7 +204,26 @@ _FRAME_JS = r"""
     }
     document.open();
     document.write(PAGE);
+    // A written page can paint before its stylesheets arrive (a flash of unstyled text), so keep it
+    // hidden until they load, or 3 s at most.
+    const hide = document.createElement("style");
+    hide.textContent = "html{visibility:hidden!important}";
+    document.documentElement.appendChild(hide);
     document.close();
+    const reveal = () => hide.remove();
+    setTimeout(reveal, 3000);
+    const whenParsed = () => {
+      const pending = [...document.querySelectorAll("link[rel~='stylesheet']")].filter((l) => !l.sheet);
+      let left = pending.length;
+      if (!left) return reveal();
+      for (const l of pending) {
+        const done = () => --left || reveal();
+        l.addEventListener("load", done, { once: true });
+        l.addEventListener("error", done, { once: true });
+      }
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", whenParsed, { once: true });
+    else whenParsed();
     // document.open() dropped earlier listeners, so add ours now.
     window.addEventListener("message", (e) => {
       if (e.source === window.parent && e.data && e.data.sr === "hash" && e.data.hash !== location.hash) {
@@ -261,6 +281,10 @@ def wrapper_page(site_id: str, ref: str, path: str, sandbox: str) -> tuple[bytes
         .replace("__SCRIPT__", _WRAPPER_JS.replace("__CONFIG__", _js(config)))
     )
     return html.encode(), nonce
+
+
+# Changes whenever the frame script does, so cached /r/ pages are refetched after a deploy (see the ETag in index.py).
+FRAME_VERSION = hashlib.sha256(_FRAME_JS.encode()).hexdigest()[:12]
 
 
 def frame_page(page: bytes, ref: str) -> bytes:

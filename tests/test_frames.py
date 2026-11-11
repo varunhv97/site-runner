@@ -63,3 +63,19 @@ def test_frame_paths_resolve_like_share_paths(client):
     assert config(client.get(f"/s/{sid}/docs/").text)["frame"] == f"/r/{sid}/docs/"
     assert client.get(f"/r/{sid}/nope.html").status_code == 404
     assert client.get(f"/s/{sid}/nope.html").status_code == 404
+
+
+def test_files_revalidate_with_etags(client):
+    sid = create(client, {"index.html": "<p>hi</p>", "a.css": "p{}"})["site"]["id"]
+    for url in (f"/r/{sid}/a.css", f"/s/{sid}/a.css", f"/r/{sid}/"):
+        first = client.get(url)
+        tag = first.headers["etag"]
+        again = client.get(url, headers={"If-None-Match": tag})
+        assert again.status_code == 304 and again.content == b"" and again.headers["etag"] == tag
+        assert client.get(url, headers={"If-None-Match": '"other"'}).status_code == 200
+    assert client.get(f"/r/{sid}/").headers["etag"] != client.get(f"/r/{sid}/a.css").headers["etag"]
+
+
+def test_frame_hides_the_page_until_its_styles_load(client):
+    sid = create(client, {"index.html": "<p>hi</p>"})["site"]["id"]
+    assert "html{visibility:hidden!important}" in client.get(f"/r/{sid}/").text
