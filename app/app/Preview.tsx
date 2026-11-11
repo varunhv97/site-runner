@@ -37,9 +37,10 @@ export default function Preview({ config, siteId, version }: { config: ContentCo
       {failed ? (
         <div className="preview-blocked">
           <p>
-            This browser didn&apos;t start the preview inside the page ({failed}). Some browsers, like Safari, block
-            it in a frame. A new tab works everywhere.
+            This browser didn&apos;t start the preview inside the page. Some browsers, like Safari, block it in a frame.
+            A new tab works everywhere.
           </p>
+          <p className="muted">{failed}</p>
           <button className="primary" onClick={openTab}>
             Open preview in a new tab
           </button>
