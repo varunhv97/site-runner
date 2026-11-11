@@ -76,6 +76,9 @@ def _bearer(authorization: str | None) -> str | None:
 def _base_url(request: Request) -> str:
     base = os.environ.get("PUBLIC_BASE_URL")
     if not base:
+        if os.environ.get("VERCEL_ENV") == "production":
+            # never build links, sign-in callbacks or the origin check from request headers in production
+            raise SiteError("PUBLIC_BASE_URL must be set in production", 503)
         host = request.headers.get("x-forwarded-host") or request.headers.get("host")
         proto = request.headers.get("x-forwarded-proto", request.url.scheme)
         base = f"{proto}://{host}"

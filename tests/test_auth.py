@@ -232,3 +232,14 @@ def test_token_uploads_count_against_the_owners_daily_limit(client, monkeypatch)
     for _ in range(2):  # uploads 2 and 3
         assert client.post(f"/api/sites/{body['site']['id']}/versions", files=v, headers=token).status_code == 200
     assert client.post(f"/api/sites/{body['site']['id']}/versions", files=v, headers=token).status_code == 429
+
+
+def test_production_requires_public_base_url(client, monkeypatch):
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    r = client.get("/api/auth/login", headers={"X-Forwarded-Host": "evil.example"}, follow_redirects=False)
+    assert r.status_code == 503  # never trusts the Host / X-Forwarded-Host headers there
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://spinsite.app")
+    r = client.get("/api/auth/login", headers={"X-Forwarded-Host": "evil.example"}, follow_redirects=False)
+    q = parse_qs(urlparse(r.headers["location"]).query)
+    assert q["redirect_uri"] == ["https://spinsite.app/api/auth/callback"]
