@@ -8,7 +8,10 @@ development (it's loaded by `npm run dev:api`), and set the same names in Vercel
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google sign-in. Unset: sign-in is off (anonymous shares locally, no shares in production) |
 | `SESSION_SECRET` | Signs the session cookie. Any long random string |
 | `ADMIN_EMAILS` | Comma-separated emails allowed to unpublish any site, review reports at `/admin`, review held sites and ban accounts |
-| `ABUSE_CONTACT` | Email or URL shown to banned accounts. Default: the GitHub issues page |
+| `ABUSE_CONTACT` | Email or URL shown to banned accounts, e.g. `abuse@spinsite.app`. Default: the GitHub issues page |
+| `REPORT_EMAIL` | Where each new abuse report is emailed, e.g. `abuse@spinsite.app`. Unset: reports only go to `/admin` |
+| `RESEND_API_KEY` | [Resend](https://resend.com) API key for sending those emails. Unset: no email is sent |
+| `MAIL_FROM` | Sender of report emails, on a domain verified in Resend. Default: `Site Runner <reports@spinsite.app>` |
 | `DATABASE_URL` | Postgres, set by the Neon integration (pooled URL). Unset locally: SQLite in `./.data` |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob, set automatically when a store is connected. Unset locally: files in `./.data` |
 | `BLOB_ACCESS` | `private` (default) or `public`, matching the store |

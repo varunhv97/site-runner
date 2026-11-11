@@ -2,8 +2,8 @@
 
 ## Reporting a vulnerability
 
-Please report security problems privately, not in a public issue:
-open a private advisory at https://github.com/varunhv97/site-runner/security/advisories/new.
+Please report security problems privately, not in a public issue: email **security@spinsite.app**, or open a
+private advisory at https://github.com/varunhv97/site-runner/security/advisories/new.
 
 Include what you found, how to reproduce it and what it affects. You'll get a reply within a week.
 Please give us a reasonable time to fix it before you share details publicly.
@@ -16,8 +16,9 @@ get around its protections (for example, read another user's data or edit tokens
 ## Reporting abuse of a shared site
 
 Shared sites are user content, not vulnerabilities. If a shared site is phishing, malware, a scam, spam or
-illegal, report it at https://spinsite.app/report (or the "Report abuse" link in the app) with its link.
-Reports are reviewed by the admins, who can take sites down and ban accounts.
+illegal, report it at https://spinsite.app/report (or the "Report abuse" link in the app), or email the link to
+**abuse@spinsite.app**. Each report reaches the admins by email right away and waits in the review queue at
+`/admin`, where they can take sites down and ban accounts.
 
 ## How user content is isolated
 

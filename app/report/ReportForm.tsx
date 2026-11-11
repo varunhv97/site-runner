@@ -3,6 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { REASONS, sendReport } from "@/lib/abuse";
+import styles from "./report.module.css";
 
 export function PrefilledReportForm() {
   const params = useSearchParams();
@@ -20,7 +21,9 @@ export function ReportForm({ initialUrl }: { initialUrl: string }) {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!reason) return setError("Pick a reason.");
+    if (!url.trim()) return setError("Paste the link to the site you're reporting.");
+    if (!reason) return setError("Pick what's wrong with the site.");
+    if (reason === "other" && !details.trim()) return setError("Tell us what's wrong with the site in the details.");
     setError(null);
     setSending(true);
     try {
@@ -39,7 +42,7 @@ export function ReportForm({ initialUrl }: { initialUrl: string }) {
         <h2>Thanks, we got your report.</h2>
         <p className="muted">
           We&apos;ll look at the site and take it down if it breaks the rules.
-          {contact ? " We may email you if we need more details." : ""}
+          {contact ? ` If we need more details, we'll email ${contact}.` : ""}
         </p>
         <button
           onClick={() => {
@@ -63,36 +66,39 @@ export function ReportForm({ initialUrl }: { initialUrl: string }) {
           type="url"
           required
           maxLength={500}
-          placeholder="https://spinsite.app/s/site-name/"
+          placeholder="https://spinsite.app/s/site-name/ or https://site-name.sites.spinsite.app/"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
         />
       </label>
+      <fieldset className={styles.reasons}>
+        <legend>What&apos;s wrong with it?</legend>
+        {REASONS.map((r) => (
+          <label key={r.value} className={styles.reason}>
+            <input
+              type="radio"
+              name="reason"
+              value={r.value}
+              checked={reason === r.value}
+              onChange={() => setReason(r.value)}
+            />
+            <strong>{r.label}</strong>
+            <span>{r.hint}</span>
+          </label>
+        ))}
+      </fieldset>
       <label className="field">
-        <span>What&apos;s wrong with it?</span>
-        <select required value={reason} onChange={(e) => setReason(e.target.value)}>
-          <option value="" disabled>
-            Pick a reason
-          </option>
-          {REASONS.map((r) => (
-            <option key={r.value} value={r.value}>
-              {r.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="field">
-        <span>Details (optional)</span>
+        <span>Details {reason === "other" ? "(required)" : "(optional)"}</span>
         <textarea
           rows={4}
           maxLength={2000}
-          placeholder="What does the site do? Which page?"
+          placeholder="What does the site do? Which page? What does it ask for?"
           value={details}
           onChange={(e) => setDetails(e.target.value)}
         />
       </label>
       <label className="field">
-        <span>Your email (optional, only if we may contact you)</span>
+        <span>Your email (optional, only if we may contact you about this report)</span>
         <input
           type="email"
           maxLength={320}

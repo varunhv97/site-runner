@@ -60,5 +60,10 @@ Everyone signs in again once: the session cookie is renamed to `__Host-sr_sessio
 - **Postgres (Neon):** connect it through the Vercel integration. It sets `DATABASE_URL`; use the pooled URL.
   Tables are created on first use. Add migrations (Alembic) before changing existing columns.
 - **Vercel Blob:** a private store. Connecting it sets `BLOB_READ_WRITE_TOKEN`.
+- **Email (abuse@ / security@):** Cloudflare Email Routing on `spinsite.app` forwards these addresses to a real
+  inbox (receive only).
+- **Report emails (Resend):** sign up at https://resend.com → Domains → add `spinsite.app` → add the DNS records it
+  shows in Cloudflare (DNS only) → verify. Create an API key with sending access, then set `RESEND_API_KEY`,
+  `REPORT_EMAIL=abuse@spinsite.app` and `ABUSE_CONTACT=abuse@spinsite.app` on the **app** project (not the content one).
 
 Set the other variables from [configuration.md](configuration.md), and register your domain's callback URL with Google.

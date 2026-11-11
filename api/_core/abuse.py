@@ -13,7 +13,7 @@ from sqlalchemy import delete, func, or_, select, update
 
 from .db import bans, rate_limits, reports, users
 from .db import sites as sites_t
-from . import hosts
+from . import hosts, mailer
 from .sites import SiteError, is_admin
 
 REASONS = ("phishing", "malware", "scam", "spam", "illegal", "other")
@@ -28,6 +28,14 @@ REPORTS_PER_HOUR = 10
 LIST_LIMIT = 200
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 DEFAULT_CONTACT = "https://github.com/varunhv97/site-runner/issues"
+REASON_LABELS = {
+    "phishing": "Phishing",
+    "malware": "Malware or a harmful download",
+    "scam": "Scam or fraud",
+    "spam": "Spam",
+    "illegal": "Illegal content",
+    "other": "Something else",
+}
 
 
 def contact() -> str:
@@ -109,6 +117,8 @@ async def create_report(
     details, contact = details.strip(), contact.strip()
     if len(details) > MAX_DETAILS:
         raise SiteError(f"Details are too long (at most {MAX_DETAILS} characters).", 400)
+    if reason == "other" and not details:
+        raise SiteError("Tell us what's wrong with the site in the details.", 400)
     if contact and (len(contact) > MAX_CONTACT or not EMAIL_RE.match(contact)):
         raise SiteError("The contact email doesn't look right. Leave it empty if you prefer.", 400)
     ref = site_ref_from_url(url, base_url)
@@ -140,7 +150,39 @@ async def create_report(
                 .returning(reports.c.id)
             )
         ).scalar_one()
-    return {"id": row, "site_id": site_id}
+        slug = await sites._current_slug(conn, site_id)
+        owner = (
+            await conn.execute(
+                select(users.c.email)
+                .select_from(sites_t.join(users, users.c.sub == sites_t.c.owner))
+                .where(sites_t.c.id == site_id)
+            )
+        ).scalar()
+    emailed = await _notify(row, site_id, slug, owner, url.strip(), reason, details, contact, user, base_url)
+    return {"id": row, "site_id": site_id, "emailed": emailed}
+
+
+async def _notify(report_id, site_id, slug, owner, url, reason, details, contact, user, base_url) -> bool:
+    """Email REPORT_EMAIL about a new report (mailer.py; off without RESEND_API_KEY). The report is already
+    stored, so a failed email only costs the instant notice: it's still in /admin."""
+    to = os.environ.get("REPORT_EMAIL", "").strip()
+    if not to or not mailer.enabled():
+        return False
+    name = slug or site_id
+    lines = [
+        f"Reason:   {REASON_LABELS.get(reason, reason)}",
+        f"Site:     {name} (id {site_id})",
+        f"Owner:    {owner or 'no account (edit token only)'}",
+        f"Link:     {url}",
+        f"Reporter: {user['email'] if user else 'not signed in'}" + (f", contact {contact}" if contact else ""),
+        "",
+        "Details:",
+        details or "(none given)",
+        "",
+        f"Review it, unpublish the site or ban the owner at {base_url}/admin (report #{report_id}).",
+    ]
+    subject = f"[Site Runner] {REASON_LABELS.get(reason, reason)} report: {name}"
+    return await mailer.send(to, subject, "\n".join(lines), reply_to=contact or None)
 
 
 async def list_reports(sites, status: str = "open") -> list[dict]:

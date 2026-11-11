@@ -1,0 +1,19 @@
+/* The report page: reason cards and the "what happens next" panel. Tokens come from app/globals.css. */
+.reasons { display: grid; gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.reasons legend { font-size: 14px; color: var(--muted); margin-bottom: 6px; padding: 0; }
+.reason {
+  display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; align-items: start; cursor: pointer;
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg);
+}
+.reason:hover { border-color: var(--muted); }
+.reason:has(input:checked) { border-color: var(--accent); background: var(--surface); }
+.reason:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.reason input { grid-row: span 2; margin: 4px 0 0; accent-color: var(--accent); width: 16px; height: 16px; }
+.reason strong { font-weight: 500; color: var(--ink); }
+.reason span { font-size: 14px; color: var(--muted); }
+@media (min-width: 640px) { .reasons { grid-template-columns: 1fr 1fr; } .reasons legend { grid-column: 1 / -1; } }
+.next { margin-top: 32px; display: grid; gap: 12px; }
+.next h2 { margin: 0; font-size: 20px; }
+.next ol { margin: 0; padding-left: 20px; display: grid; gap: 8px; color: var(--muted); }
+.next ol strong { color: var(--ink); font-weight: 500; }
+.alt { margin: 0; color: var(--muted); font-size: 15px; }

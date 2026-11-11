@@ -1,12 +1,12 @@
 // Abuse reports (anyone) and admin review (ADMIN_EMAILS) against the Python API.
 
 export const REASONS = [
-  { value: "phishing", label: "Phishing (asks for passwords or card details)" },
-  { value: "malware", label: "Malware or a harmful download" },
-  { value: "scam", label: "Scam or fraud" },
-  { value: "spam", label: "Spam" },
-  { value: "illegal", label: "Illegal content" },
-  { value: "other", label: "Something else" },
+  { value: "phishing", label: "Phishing", hint: "Pretends to be a bank, Google, Microsoft or similar to get passwords or card details" },
+  { value: "malware", label: "Malware", hint: "Offers a harmful download or tries to install something" },
+  { value: "scam", label: "Scam or fraud", hint: "Fake shop, giveaway, investment or support line" },
+  { value: "spam", label: "Spam", hint: "Junk pages or links to unrelated ads" },
+  { value: "illegal", label: "Illegal content", hint: "Content that's against the law, including copyright infringement" },
+  { value: "other", label: "Something else", hint: "Anything else that breaks the rules. Tell us what below" },
 ] as const;
 
 export type Report = {

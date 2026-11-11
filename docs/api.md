@@ -63,7 +63,9 @@ Admins are the `ADMIN_EMAILS` accounts (signed in).
 
 - `url`: a share link of this app (`/s/<name or id>/...`) or, when `USERCONTENT_BASE_DOMAIN` is set,
   `https://<id or name>.<that domain>/...`. `reason`: `phishing`, `malware`, `scam`, `spam`, `illegal` or `other`.
-  `details` up to 2,000 characters; `contact` an optional email.
+  `details` up to 2,000 characters (required for `other`); `contact` an optional email.
+- Each report is stored for `/admin` and, when `REPORT_EMAIL` and `RESEND_API_KEY` are set, emailed there with
+  the site, its owner and the details (reply-to: the reporter's contact). A failed email never loses a report.
 - Admins are the `ADMIN_EMAILS`. An admin's `DELETE /api/sites/<id>` marks the site's open reports actioned.
 - A banned account gets 403 on every share write (create, publish, live, start page, link name, token, claim),
   and so does an edit token for a banned owner's site. Banning unpublishes the account's sites; unbanning

@@ -52,7 +52,7 @@ def test_report_validation(client, monkeypatch):
     assert report(client, f"{BASE}/s/nosuchsite/").status_code == 404
     assert report(client, f"{BASE}/s/{sid}/", reason="ugly").status_code == 400
     for reason in abuse.REASONS:
-        assert report(client, f"{BASE}/s/{sid}/", reason=reason).status_code == 200, reason
+        assert report(client, f"{BASE}/s/{sid}/", reason=reason, details="why").status_code == 200, reason
     assert report(client, f"{BASE}/s/{sid}/", details="x" * 2001).status_code == 400
     assert report(client, f"{BASE}/s/{sid}/" + "a" * 500).status_code == 400
     assert report(client, f"{BASE}/s/{sid}/", contact="not-an-email").status_code == 400
@@ -222,3 +222,95 @@ def test_unban_restores_sharing_but_not_sites(client, monkeypatch):
     new = share(client)
     assert new.status_code == 200
     assert set(write_attempts(client, new.json()["site"]["id"]).values()) == {200}
+
+
+@pytest.fixture
+def sent(monkeypatch):
+    """Capture report emails instead of calling Resend."""
+    import _core.mailer as mailer
+
+    out = []
+
+    async def fake_send(to, subject, text, reply_to=None):
+        out.append({"to": to, "subject": subject, "text": text, "reply_to": reply_to})
+        return True
+
+    monkeypatch.setenv("RESEND_API_KEY", "test-key")
+    monkeypatch.setenv("REPORT_EMAIL", "abuse@spinsite.app")
+    monkeypatch.setattr(mailer, "send", fake_send)
+    return out
+
+
+def test_a_report_emails_the_team(client, monkeypatch, sent):
+    sign_in(client, monkeypatch, ALICE)
+    r = client.post(
+        "/api/sites",
+        files={"file": ("s.zip", make_zip({"index.html": "x"}))},
+        data={"name": "x", "slug": "bucket-game"},
+    )
+    client.cookies.clear()
+    r = report(client, f"{BASE}/s/bucket-game/", "scam", details="Asks for card numbers", contact="me@example.com")
+    assert r.status_code == 200, r.text
+    assert len(sent) == 1
+    mail = sent[0]
+    assert mail["to"] == "abuse@spinsite.app" and mail["reply_to"] == "me@example.com"
+    assert "Scam" in mail["subject"] and "bucket-game" in mail["subject"]
+    assert "alice@example.com" in mail["text"]  # the owner, so the admin can act straight away
+    assert "Asks for card numbers" in mail["text"] and f"{BASE}/admin" in mail["text"]
+
+
+def test_no_email_without_config_and_reports_survive_mail_failures(client, monkeypatch, sent):
+    import _core.mailer as mailer
+
+    sign_in(client, monkeypatch, ALICE)
+    sid = share(client).json()["site"]["id"]
+    client.cookies.clear()
+    monkeypatch.delenv("REPORT_EMAIL")
+    assert report(client, f"{BASE}/s/{sid}/").status_code == 200
+    assert sent == []  # no destination: nothing sent, report still stored
+
+    monkeypatch.setenv("REPORT_EMAIL", "abuse@spinsite.app")
+
+    async def failing(*a, **kw):
+        return False
+
+    monkeypatch.setattr(mailer, "send", failing)
+    assert report(client, f"{BASE}/s/{sid}/").status_code == 200  # a mail outage never loses a report
+    as_admin(client, monkeypatch)
+    assert len(open_reports(client)) == 2
+
+
+def test_mailer_calls_resend(monkeypatch):
+    import asyncio
+
+    import httpx
+
+    import _core.mailer as mailer
+
+    seen = {}
+
+    def handler(request):
+        seen["auth"] = request.headers["authorization"]
+        seen["body"] = request.read()
+        return httpx.Response(200, json={"id": "e1"})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    assert asyncio.run(mailer.send("abuse@spinsite.app", "hi", "body")) is False  # no key: off
+    monkeypatch.setenv("RESEND_API_KEY", "re_123")
+    assert asyncio.run(mailer.send("abuse@spinsite.app", "hi", "body", reply_to="me@example.com")) is True
+    assert seen["auth"] == "Bearer re_123"
+    assert b'"reply_to":"me@example.com"' in seen["body"].replace(b" ", b"")
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(lambda r: httpx.Response(422)), **kw)
+    )
+    assert asyncio.run(mailer.send("abuse@spinsite.app", "hi", "body")) is False  # refused: False, no exception
+
+
+def test_something_else_needs_details(client, monkeypatch):
+    sign_in(client, monkeypatch, ALICE)
+    sid = share(client).json()["site"]["id"]
+    client.cookies.clear()
+    r = report(client, f"{BASE}/s/{sid}/", "other")
+    assert r.status_code == 400 and "details" in r.json()["error"]
+    assert report(client, f"{BASE}/s/{sid}/", "other", details="Impersonates my business").status_code == 200

@@ -31,7 +31,7 @@ apart from other shared sites. Previews get your files straight from your browse
 share. See [SECURITY.md](SECURITY.md) for the details and to report a problem.
 
 Shared sites are made by Site Runner's users. If one is phishing, malware, a scam or otherwise abusive,
-[report it](https://spinsite.app/report) and we'll take it down.
+[report it](https://spinsite.app/report) (or email abuse@spinsite.app) and we'll take it down.
 
 ## Limits
 
