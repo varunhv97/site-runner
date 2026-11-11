@@ -8,7 +8,7 @@ Site Runner runs on Vercel. The project is connected to this repo:
 
 ## Routing
 
-`vercel.json` does three things:
+`vercel.json` does four things:
 - sends `/api/*`, `/s/*` and `/r/*` to `api/index.py`
 - redirects `www.spinsite.app` to `spinsite.app`, so sign-in, cookies and browser storage stay on one origin
 - redirects the old `spinsite.vercel.app` address for shared links (`/s/`, `/r/`), the landing page and
