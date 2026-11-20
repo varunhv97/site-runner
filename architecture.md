@@ -61,8 +61,10 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
 - `client.py` async httpx with an account API token; `bundle.py` zips a folder (skips hidden files and symlinks,
   checks the server's limits first); `config.py` saves url + token in `~/.config/spinsite/config.json` (0600),
   `SPINSITE_TOKEN`/`SPINSITE_URL` override. Commands: login, logout, whoami, usage, sites, versions, deploy, live,
-  rename, rm; all take `--json`. Uses existing routes only (`/api/me/sites` includes versions).
-- `mcp_server.py` (`spinsite mcp`): MCPServer (mcp SDK v2) over stdio, 9 tools with read-only/destructive hints;
+  rename, rm, pull, members, invite, remove-member; all take `--json`. Uses existing routes only.
+- `pull.py`: downloads a version (sha256-checked, 8 at a time) into a folder, skipping hidden/absolute/`..`/escaping
+  paths; writes `.spinsite.json` (site, version, entry, server), which `deploy` uses as its target and base.
+- `mcp_server.py` (`spinsite mcp`): MCPServer (mcp SDK v2) over stdio, 13 tools with read-only/destructive hints;
   API/bundle errors raised as ToolError so the model sees them. Typed `dict[str, Any]` returns → structured output.
 - `tests/test_cli.py` and `tests/test_mcp.py` run against the app through httpx's ASGI transport.
 
@@ -95,6 +97,10 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
 - `Sites.can_edit` (owner or member) gates publish, live, entry, version files, site files, hold; everything else
   stays owner/edit-token only (`check_access`). Quota: owner's; daily uploads: publisher's; bans: owner and member.
 - `/api/me/sites`: owned sites then member sites, each with `role`, `owner_email`, versions' `published_by_email`.
+- Stale publishes: clients send `base_version` (the version they pulled/last published); `add_version` refuses 409
+  inside the locked transaction if a newer one is live. No base = replace. CLI/MCP `--force`, /app "Publish anyway".
+- /app: `lib/collab.ts` (stale decision, role), `app/app/Members.tsx` (owner panel; Leave for members); a member's
+  local copy has `remote` without a token and publishes with the session.
 
 ## Abuse (`_core/abuse.py`, `/report`, `/admin`)
 - `/report` posts `POST /api/reports`: the link (`/s/<ref>` or `<ref>.<UC>`) resolves like `/s/` into `reports`.

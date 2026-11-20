@@ -75,12 +75,15 @@ Owner invites other accounts to publish to and pull from a site. Latest publish 
   a member can leave
 - [x] 2. Access: one `can_edit(user, site)` check (owner or member) used by publish, live, entry, version_files,
   site_blob, `_can_share`; owner-only routes unchanged. `/api/me/sites` includes shared sites with `role`
-- [ ] 3. CLI/MCP: `spinsite pull <site> [dir] [--version n]` + MCP `pull` tool; writes `.spinsite.json`
+- [x] 3. CLI/MCP: `spinsite pull <site> [dir] [--version n]` + MCP `pull` tool; writes `.spinsite.json`
   (site id, pulled version) that `deploy` reads by default. Never writes hidden files, absolute paths or
   `..` paths. Deploy warns if live is newer than the pulled version (`--force` to skip)
-- [ ] 4. /app: "Shared with you" list with Open here; members panel (owner); version history shows who
+- [x] 4. /app: "Shared with you" list with Open here; members panel (owner); version history shows who
   published; same stale-version warning before Publish
-- [ ] 5. Tests (CLI/MCP pull; server: `tests/test_members.py` done), /docs section; update requirements.md + architecture.md
+- [x] 5. Tests (`test_members.py`, `test_pull.py`, `test_mcp.py`, `tests/js/collab.test.mjs`), /docs section, docs
+- [x] Server-side `base_version` check (atomic stale publish); one migrate per process on parallel cold requests
+- [ ] Follow-ups: re-pull into a folder doesn't delete files the newer version removed; leaving after the owner
+  already removed you is 403 not 404 (UI copes); 409 body could include the live version
 
 ## Next
 - [ ] Deploy the content origin: DNS + second Vercel project (docs/deploying.md), then check a live share link
