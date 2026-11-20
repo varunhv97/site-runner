@@ -1,7 +1,7 @@
 """Safety holds: a site whose upload looked like phishing, a seed-phrase grab or a miner (scan.py) keeps its
 files, but its links answer 451 until an admin approves it. Rejecting unpublishes the site.
 
-Its own table (create_all adds tables, never columns). A site is held while any of its rows is "held".
+A site is held while any of its rows is "held".
 """
 
 import json

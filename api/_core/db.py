@@ -6,6 +6,8 @@ Files live in Blob storage under their sha256; this database records which files
 import os
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -17,6 +19,8 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    inspect,
+    text,
 )
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -106,8 +110,8 @@ api_tokens = Table(
 )
 
 
-# Size of each stored file (blobs/<digest>), for the per-account storage quota. Its own table because
-# create_all can add tables but not columns. Files stored before it existed get a row lazily (Sites._sizes).
+# Size of each stored file (blobs/<digest>), for the per-account storage quota. Files stored before it existed get
+# a row lazily (Sites._sizes).
 blobs = Table(
     "blobs",
     metadata,
@@ -199,6 +203,28 @@ def make_engine(url: str | None = None) -> AsyncEngine:
     return create_async_engine(async_url, poolclass=NullPool, connect_args=connect_args)
 
 
-async def create_schema(engine: AsyncEngine) -> None:
-    async with engine.begin() as conn:
-        await conn.run_sync(metadata.create_all)
+MIGRATIONS = os.path.join(os.path.dirname(__file__), "migrations")
+BASELINE = "0001"  # the schema create_all made before migrations
+MIGRATION_LOCK = 0x53524D47  # any constant: the Postgres advisory lock that serialises migrations
+
+
+def _upgrade(connection) -> None:
+    config = Config()
+    config.set_main_option("script_location", MIGRATIONS)
+    config.attributes["connection"] = connection  # migrations/env.py runs on this connection and transaction
+    tables = set(inspect(connection).get_table_names())
+    if "sites" in tables and "alembic_version" not in tables:
+        command.stamp(config, BASELINE)  # made by create_all before migrations: it already has the baseline
+    command.upgrade(config, "head")
+
+
+async def migrate(engine: AsyncEngine) -> None:
+    """Bring the schema to the newest migration (migrations/versions). Runs on first use in each process, like
+    create_all did. On Postgres it's one transaction (DDL is transactional) holding a transaction-level advisory
+    lock, so concurrent cold starts wait for each other and the later ones find nothing to do. Transaction-level,
+    because Neon's pooler (PgBouncer, transaction mode) may hand the session to someone else between transactions."""
+    async with engine.connect() as conn:
+        if engine.dialect.name == "postgresql":
+            await conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": MIGRATION_LOCK})
+        await conn.run_sync(_upgrade)
+        await conn.commit()

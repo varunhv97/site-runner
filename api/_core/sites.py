@@ -20,8 +20,8 @@ from sqlalchemy.exc import IntegrityError
 from . import holds, hosts, scan
 from .db import (
     blobs,
-    create_schema,
     deleted_versions,
+    migrate,
     sites,
     slugs,
     uploads,
@@ -244,7 +244,7 @@ class Sites:
 
     async def _ready(self) -> None:
         if not self._schema_ready:
-            await create_schema(self.engine)
+            await migrate(self.engine)
             self._schema_ready = True
 
     def _upsert(self, table):
