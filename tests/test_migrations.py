@@ -170,3 +170,65 @@ def test_members_made_before_consent_go_back_to_pending(engine):
             return (await conn.execute(text("SELECT email, sub, accepted_at FROM site_members"))).all()
 
     assert [tuple(r) for r in run(rows())] == [("bob@example.com", None, None)]
+
+
+def test_lock_timeouts_are_retried(engine, monkeypatch):
+    """A migration that can't get a table lock within LOCK_TIMEOUT rolls back and tries again after a pause."""
+    from sqlalchemy.exc import OperationalError
+
+    class Timeout(Exception):
+        sqlstate = "55P03"
+
+    calls, real = [], db._migrate_once
+
+    async def flaky(eng):
+        calls.append(1)
+        if len(calls) < 3:
+            raise OperationalError("ALTER TABLE", {}, Timeout("canceling statement due to lock timeout"))
+        await real(eng)
+
+    monkeypatch.setattr(db, "_migrate_once", flaky)
+    monkeypatch.setattr(db, "RETRY_DELAY", 0)
+    run(migrate(engine))
+    assert len(calls) == 3 and run(state(engine))[0] == HEAD
+
+    calls.clear()
+
+    async def always(eng):
+        calls.append(1)
+        raise OperationalError("ALTER TABLE", {}, Timeout("lock timeout"))
+
+    monkeypatch.setattr(db, "_migrate_once", always)
+    with pytest.raises(OperationalError):
+        run(migrate(engine))
+    assert len(calls) == db.MIGRATION_ATTEMPTS
+
+
+def test_other_errors_are_not_retried(engine, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    calls = []
+
+    async def broken(eng):
+        calls.append(1)
+        raise OperationalError("SELECT", {}, Exception("connection refused"))
+
+    monkeypatch.setattr(db, "_migrate_once", broken)
+    with pytest.raises(OperationalError):
+        run(migrate(engine))
+    assert calls == [1]
+
+
+def test_postgres_sets_a_lock_timeout(engine):
+    if engine.dialect.name != "postgresql":
+        pytest.skip("Postgres only")
+    seen = []
+
+    from sqlalchemy import event
+
+    @event.listens_for(engine.sync_engine, "before_cursor_execute")
+    def log(conn, cursor, statement, *a):
+        seen.append(statement)
+
+    run(migrate(engine))
+    assert any("lock_timeout = '5s'" in s for s in seen)

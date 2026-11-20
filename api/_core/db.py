@@ -3,6 +3,7 @@
 Files live in Blob storage under their sha256; this database records which files make up each version.
 """
 
+import asyncio
 import os
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -22,6 +23,7 @@ from sqlalchemy import (
     inspect,
     text,
 )
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -235,13 +237,38 @@ def _upgrade(connection) -> None:
     command.upgrade(config, "head")
 
 
+# A migration's ALTER TABLE waits for an ACCESS EXCLUSIVE lock, and every later read of that table queues behind it:
+# give up after LOCK_TIMEOUT (a long query is holding the table) and try again shortly, rather than stall the site.
+LOCK_TIMEOUT = "5s"
+MIGRATION_ATTEMPTS = 4
+RETRY_DELAY = 1.0  # seconds, doubled after each lock timeout
+
+
+def _lock_timed_out(e: DBAPIError) -> bool:
+    code = getattr(e.orig, "sqlstate", None) or getattr(e.orig, "pgcode", None)
+    return code == "55P03" or "lock timeout" in str(e.orig).lower()  # lock_not_available
+
+
+async def _migrate_once(engine: AsyncEngine) -> None:
+    async with engine.connect() as conn:
+        if engine.dialect.name == "postgresql":
+            await conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": MIGRATION_LOCK})
+            # after taking the advisory lock, so cold starts still wait for each other's (possibly long) migration
+            await conn.execute(text(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'"))
+        await conn.run_sync(_upgrade)
+        await conn.commit()
+
+
 async def migrate(engine: AsyncEngine) -> None:
     """Bring the schema to the newest migration (migrations/versions). Runs on first use in each process, like
     create_all did. On Postgres it's one transaction (DDL is transactional) holding a transaction-level advisory
     lock, so concurrent cold starts wait for each other and the later ones find nothing to do. Transaction-level,
-    because Neon's pooler (PgBouncer, transaction mode) may hand the session to someone else between transactions."""
-    async with engine.connect() as conn:
-        if engine.dialect.name == "postgresql":
-            await conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": MIGRATION_LOCK})
-        await conn.run_sync(_upgrade)
-        await conn.commit()
+    because Neon's pooler (PgBouncer, transaction mode) may hand the session to someone else between transactions.
+    Table locks wait at most LOCK_TIMEOUT; on a timeout everything rolls back and it retries with backoff."""
+    for attempt in range(MIGRATION_ATTEMPTS):
+        try:
+            return await _migrate_once(engine)
+        except DBAPIError as e:
+            if attempt == MIGRATION_ATTEMPTS - 1 or not _lock_timed_out(e):
+                raise
+            await asyncio.sleep(RETRY_DELAY * 2**attempt)
