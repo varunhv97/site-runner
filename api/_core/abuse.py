@@ -9,9 +9,9 @@ import re
 import time
 from urllib.parse import unquote, urlsplit
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 
-from .db import bans, rate_limits, reports, users
+from .db import bans, rate_limits, reports, users, versions
 from .db import sites as sites_t
 from . import hosts, mailer
 from .sites import SiteError, is_admin
@@ -216,6 +216,7 @@ async def list_reports(sites, status: str = "open") -> list[dict]:
         raise SiteError(f"status must be one of {', '.join(STATUSES + ('all',))}", 400)
     await sites._ready()
     per_site = select(reports.c.site_id, func.count().label("n")).group_by(reports.c.site_id).subquery()
+    publisher = users.alias("publisher")  # who published the live version: the owner or a member
     q = (
         select(
             reports,
@@ -223,11 +224,14 @@ async def list_reports(sites, status: str = "open") -> list[dict]:
             sites_t.c.owner,
             sites_t.c.deleted_at,
             users.c.email.label("owner_email"),
+            publisher.c.email.label("published_by_email"),
         )
         .select_from(
             reports.join(per_site, per_site.c.site_id == reports.c.site_id)
             .outerjoin(sites_t, sites_t.c.id == reports.c.site_id)
             .outerjoin(users, users.c.sub == sites_t.c.owner)
+            .outerjoin(versions, and_(versions.c.site_id == sites_t.c.id, versions.c.n == sites_t.c.live))
+            .outerjoin(publisher, publisher.c.sub == versions.c.published_by)
         )
         .order_by(reports.c.created_at.desc(), reports.c.id.desc())
         .limit(LIST_LIMIT)
@@ -244,6 +248,7 @@ async def list_reports(sites, status: str = "open") -> list[dict]:
                     "site_id": r.site_id,
                     "slug": await sites._current_slug(conn, r.site_id),
                     "owner_email": r.owner_email,
+                    "published_by_email": r.published_by_email,  # the live version's publisher
                     "owner_banned": await _is_banned(conn, r.owner, r.owner_email) if r.owner else False,
                     "site_unpublished": r.deleted_at is not None,
                     "url": r.url,

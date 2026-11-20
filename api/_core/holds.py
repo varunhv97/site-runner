@@ -7,9 +7,9 @@ A site is held while any of its rows is "held".
 import json
 import time
 
-from sqlalchemy import Column, ForeignKeyConstraint, Index, Integer, String, Table, Text, select, update
+from sqlalchemy import Column, ForeignKeyConstraint, Index, Integer, String, Table, Text, and_, select, update
 
-from .db import metadata, sites, users
+from .db import metadata, sites, users, versions
 
 HELD, APPROVED, REJECTED = "held", "approved", "rejected"
 HELD_MESSAGE = "This site is waiting for a safety review."
@@ -62,9 +62,21 @@ async def site_status(engine, site_id: str) -> dict:
 
 
 async def list_holds(engine, state: str | None = HELD) -> list[dict]:
+    publisher = users.alias("publisher")  # who published the held version: the owner or a member
     q = (
-        select(holds, sites.c.name, sites.c.owner, users.c.email.label("owner_email"))
-        .select_from(holds.join(sites, sites.c.id == holds.c.site_id).outerjoin(users, users.c.sub == sites.c.owner))
+        select(
+            holds,
+            sites.c.name,
+            sites.c.owner,
+            users.c.email.label("owner_email"),
+            publisher.c.email.label("published_by_email"),
+        )
+        .select_from(
+            holds.join(sites, sites.c.id == holds.c.site_id)
+            .outerjoin(users, users.c.sub == sites.c.owner)
+            .outerjoin(versions, and_(versions.c.site_id == holds.c.site_id, versions.c.n == holds.c.n))
+            .outerjoin(publisher, publisher.c.sub == versions.c.published_by)
+        )
         .order_by(holds.c.created_at.desc())
     )
     if state:
@@ -77,6 +89,7 @@ async def list_holds(engine, state: str | None = HELD) -> list[dict]:
             "n": r.n,
             "name": r.name,
             "owner_email": r.owner_email,
+            "published_by_email": r.published_by_email,
             "reasons": json.loads(r.reasons),
             "created_at": r.created_at,
             "status": r.status,

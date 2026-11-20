@@ -84,6 +84,9 @@ export function AdminReports() {
               <div className="meta">
                 <span>Owner: {r.owner_email ?? "none (token-only site)"}</span>
                 {r.owner_banned && <span className="badge">banned</span>}
+                {r.published_by_email && r.published_by_email !== r.owner_email && (
+                  <span>Live version published by member: {r.published_by_email}</span>
+                )}
                 {r.site_unpublished && <span className="badge">unpublished</span>}
                 {r.contact && <span className="muted">Reporter: {r.contact}</span>}
               </div>

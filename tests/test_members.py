@@ -361,3 +361,15 @@ def test_my_sites_has_roles_and_publishers(client, monkeypatch):
     assert [v["published_by_email"] for v in listed[1]["versions"]] == ["alice@example.com", "bob@example.com"]
     assert listed[1]["url"].endswith(f"/s/{sid}/")
     assert "published_by_email" not in client.get(f"/api/sites/{sid}").json()["site"]["versions"][0]  # public
+
+
+def test_admin_sees_which_member_published_the_live_version(client, monkeypatch):
+    from test_abuse import open_reports, report
+
+    monkeypatch.setenv("ADMIN_EMAILS", "admin@example.com")
+    sid = shared_with_bob(client, monkeypatch)
+    assert upload(client, {}, url=f"/api/sites/{sid}/versions").status_code == 200
+    assert report(client, f"http://testserver/s/{sid}/").status_code == 200
+    sign_in(client, monkeypatch, ADMIN)
+    [r] = open_reports(client)
+    assert (r["owner_email"], r["published_by_email"]) == ("alice@example.com", "bob@example.com")

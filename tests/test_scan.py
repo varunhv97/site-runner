@@ -273,8 +273,8 @@ def test_admin_approves_a_hold(client, monkeypatch, held_site):
     sid = held_site["site"]["id"]
     sign_in(client, monkeypatch, BOB)
     listed = client.get("/api/admin/holds?status=held").json()["holds"]
-    assert [(h["site_id"], h["n"], h["status"], h["owner_email"]) for h in listed] == [
-        (sid, 1, "held", "alice@example.com")
+    assert [(h["site_id"], h["n"], h["status"], h["owner_email"], h["published_by_email"]) for h in listed] == [
+        (sid, 1, "held", "alice@example.com", "alice@example.com")
     ]
     assert client.post(f"/api/admin/holds/{sid}", json={"decision": "maybe"}).status_code == 400
     r = client.post(f"/api/admin/holds/{sid}", json={"decision": "approve"})

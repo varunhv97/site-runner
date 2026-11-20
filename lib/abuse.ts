@@ -15,6 +15,8 @@ export type Report = {
   slug: string | null;
   site_url: string;
   owner_email: string | null;
+  /** Who published the live version (the owner or a member); null for edit-token or older publishes. */
+  published_by_email: string | null;
   owner_banned: boolean;
   site_unpublished: boolean;
   url: string;
