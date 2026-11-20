@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response  # noqa: 
 from pydantic import BaseModel  # noqa: E402
 from sqlalchemy.exc import OperationalError  # noqa: E402
 
-from _core import abuse, api_tokens, auth, hosts, members  # noqa: E402
+from _core import abuse, api_tokens, auth, hosts, invite_links, members  # noqa: E402
 from _core.content import CONTENT_HEADERS, held, make_content_app, not_found  # noqa: E402
 from _core.db import make_engine  # noqa: E402
 from _core.sites import SiteError, Sites, is_admin  # noqa: E402
@@ -545,6 +545,61 @@ async def remove_site_member(request: Request, site_id: str, email: str):
     _check_origin(request)
     await members.remove(sites, site_id, email, await _current_user(request))
     return {"ok": True}
+
+
+# ---- Invite links (one-time, an hour; _core/invite_links.py). Not in the CLI's MCP tools: a link is a credential ----
+
+
+class CodeBody(BaseModel):
+    code: str
+
+
+async def _link_owner(request: Request, site_id: str) -> dict:
+    _check_origin(request)
+    user = await _current_user(request)
+    if not user:
+        raise SiteError("sign in to manage a site's members", 401)
+    await _can_share(user, site_id)
+    return user
+
+
+@app.post("/api/sites/{site_id}/invite-links")
+async def create_invite_link(request: Request, site_id: str):
+    """A one-time link to join the site (owner only). The code is in this response only, never again."""
+    user = await _link_owner(request, site_id)
+    link, code = await invite_links.create(sites, site_id, user)
+    return {"link": link, "url": f"{_base_url(request)}/join#{code}"}
+
+
+@app.get("/api/sites/{site_id}/invite-links")
+async def list_invite_links(request: Request, site_id: str):
+    """Outstanding links and recently used ones (who used them), for the owner. Never the codes."""
+    return await invite_links.list_links(sites, site_id, await _current_user(request))
+
+
+@app.delete("/api/sites/{site_id}/invite-links/{link_id}")
+async def revoke_invite_link(request: Request, site_id: str, link_id: str):
+    _check_origin(request)
+    await invite_links.revoke(sites, site_id, link_id, await _current_user(request))
+    return {"ok": True}
+
+
+@app.post("/api/invite-links/lookup")
+async def lookup_invite_link(request: Request, body: CodeBody):
+    """{site_name, owner_email, expires_at} for a usable code, so /join can ask first. Signed-in accounts only."""
+    _check_origin(request)
+    return await invite_links.lookup(sites, body.code, await _current_user(request), _client_ip(request))
+
+
+@app.post("/api/invite-links/redeem")
+async def redeem_invite_link(request: Request, body: CodeBody):
+    """Join the site as a member; the link is used up."""
+    _check_origin(request)
+    user = await _current_user(request)
+    if user:
+        await _can_share(user)
+    site = await invite_links.redeem(sites, body.code, user, _client_ip(request))
+    return {"site": site | {"url": _share_url(request, _ref(site))}}
 
 
 @app.get("/api/me/invites")

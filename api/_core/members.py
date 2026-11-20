@@ -12,7 +12,7 @@ import time
 from sqlalchemy import delete, func, select, update
 
 from .abuse import EMAIL_RE, MAX_CONTACT, _hit_rate_limit
-from .db import site_members, sites as sites_t, users
+from .db import invite_links, site_members, sites as sites_t, users
 from .sites import SiteError
 
 MAX_MEMBERS = 10
@@ -20,11 +20,32 @@ MAX_MEMBERS = 10
 INVITES_PER_HOUR = 30
 # Accepts and declines per account per hour.
 ANSWERS_PER_HOUR = 60
+FULL_MESSAGE = (
+    f"A site can have {MAX_MEMBERS} members, counting pending invites and unused invite links. Remove one first."
+)
 
 
 def _member(row) -> dict:
     status = "accepted" if row.accepted_at is not None else "pending"
     return {"email": row.email, "status": status, "created_at": row.created_at}
+
+
+def _outstanding_links(site_id: str, now: int):
+    """A site's invite links that can still be redeemed: unused, unrevoked, unexpired."""
+    return (
+        invite_links.c.site_id == site_id,
+        invite_links.c.used_at.is_(None),
+        invite_links.c.revoked_at.is_(None),
+        invite_links.c.expires_at > now,
+    )
+
+
+async def seats_used(conn, site_id: str, now: int | None = None) -> int:
+    """Members (accepted and pending) plus outstanding invite links: together at most MAX_MEMBERS."""
+    now = int(time.time()) if now is None else now
+    taken = (await conn.execute(select(func.count()).where(site_members.c.site_id == site_id))).scalar_one()
+    links = (await conn.execute(select(func.count()).where(*_outstanding_links(site_id, now)))).scalar_one()
+    return taken + links
 
 
 async def _owner_email(conn, site) -> str | None:
@@ -49,6 +70,7 @@ async def _listing(conn, site) -> dict:
         "owner": {"email": await _owner_email(conn, site)},
         "members": [_member(r) for r in rows],
         "max_members": MAX_MEMBERS,
+        "invite_links": await seats_used(conn, site.id) - len(rows),  # outstanding ones, which take seats too
     }
 
 
@@ -71,9 +93,8 @@ async def invite(sites, site_id: str, email: str, user: dict | None) -> dict:
         exists = select(site_members.c.email).where(site_members.c.site_id == site_id, site_members.c.email == email)
         if (await conn.execute(exists)).first():
             raise SiteError(f"{email} is already a member of this site.", 409)
-        count = select(func.count()).where(site_members.c.site_id == site_id)
-        if (await conn.execute(count)).scalar_one() >= MAX_MEMBERS:
-            raise SiteError(f"A site can have {MAX_MEMBERS} members. Remove one first.", 409)
+        if await seats_used(conn, site_id) >= MAX_MEMBERS:
+            raise SiteError(FULL_MESSAGE, 409)
         await _hit_rate_limit(
             sites, conn, f"invite:{user['sub']}", INVITES_PER_HOUR, "Too many invites this hour. Try again later."
         )
