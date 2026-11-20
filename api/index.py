@@ -557,7 +557,9 @@ async def my_invites(request: Request):
 async def accept_invite(request: Request, site_id: str):
     """Become a member of the site (publish, make live, pull). The invitee's decision only."""
     _check_origin(request)
-    site = await members.accept(sites, site_id, await _current_user(request))
+    user = await _current_user(request)
+    await _can_share(user, site_id)  # a banned account can't join sites either
+    site = await members.accept(sites, site_id, user)
     return {"site": site | {"url": _share_url(request, _ref(site))}}
 
 

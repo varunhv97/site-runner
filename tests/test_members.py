@@ -309,6 +309,16 @@ def test_banned_member_is_refused(client, monkeypatch):
     assert upload(client, {}, url=f"/api/sites/{sid}/versions").status_code == 200
 
 
+def test_banned_account_cant_accept_an_invite(client, monkeypatch):
+    monkeypatch.setenv("ADMIN_EMAILS", "admin@example.com")
+    sid = alices_site(client, monkeypatch)
+    assert invite(client, sid, "bob@example.com").status_code == 200
+    sign_in(client, monkeypatch, ADMIN)
+    assert client.post("/api/admin/bans", json={"email": "bob@example.com"}).status_code == 200
+    sign_in(client, monkeypatch, BOB)
+    assert accept(client, sid).status_code == 403
+
+
 def test_storage_counts_against_the_owner_and_uploads_against_the_publisher(client, monkeypatch, tmp_path):
     monkeypatch.setenv("STORAGE_QUOTA_MB", str(4096 / 1024 / 1024))
     sid = shared_with_bob(client, monkeypatch)  # Alice's site uses 2 bytes ("v1")
