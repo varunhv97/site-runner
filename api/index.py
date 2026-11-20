@@ -193,8 +193,9 @@ def _check_origin(request: Request) -> None:
 
 
 async def _can_share(user: dict | None, site_id: str | None = None) -> None:
-    """Banned accounts can't share: refuses writes by a banned user, and writes (also with an edit token) to a
-    banned owner's site. Every share write route calls this before doing anything."""
+    """Banned accounts can't share: refuses writes by a banned user (an owner or a member acting on someone's
+    site), and writes by anyone (a member, an edit token) to a banned owner's site. Every share write route calls
+    this before doing anything."""
     await abuse.check_can_share(sites, user, site_id)
 
 
@@ -294,7 +295,7 @@ async def my_sites(request: Request):
     user = await _current_user(request)
     if not user:
         raise SiteError("sign in to list your sites", 401)
-    return {"sites": [meta | {"url": _share_url(request, _ref(meta))} for meta in await sites.user_sites(user["sub"])]}
+    return {"sites": [meta | {"url": _share_url(request, _ref(meta))} for meta in await sites.user_sites(user)]}
 
 
 @app.get("/api/me/usage")
@@ -435,13 +436,13 @@ async def set_live(request: Request, site_id: str, body: LiveBody, authorization
 
 @app.get("/api/sites/{site_id}/versions/{n}/files")
 async def version_files(request: Request, site_id: str, n: int, authorization: str | None = Header(None)):
-    """A version's files and start page, so its owner can open the site in another browser."""
+    """A version's files and start page, so its owner or a member can open (pull) the site elsewhere."""
     return await sites.version_files(site_id, _bearer(authorization), n, await _current_user(request))
 
 
 @app.get("/api/sites/{site_id}/files/{digest}")
 async def site_file(request: Request, site_id: str, digest: str, authorization: str | None = Header(None)):
-    """One file's original bytes for the owner. Always a sandboxed download: the bytes are a shared site's
+    """One file's original bytes for the owner or a member. Always a sandboxed download: the bytes are a shared site's
     (untrusted) content, so they must never render on this app's origin."""
     data = await sites.site_blob(site_id, _bearer(authorization), digest, await _current_user(request))
     return Response(

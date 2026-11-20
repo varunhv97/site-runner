@@ -99,8 +99,8 @@ async def review(engine, site_id: str, approve: bool, admin_email: str) -> int:
 
 
 async def owner_status(store, site_id: str, token: str | None, user: dict | None) -> dict:
-    """Whether a site is held, for its owner or token holder (store: the Sites instance)."""
+    """Whether a site is held, for its owner, members or token holder (store: the Sites instance)."""
     await store._ready()
     async with store.engine.connect() as conn:
-        store.check_access(await store._site(conn, site_id), token, user)
+        await store.check_edit(conn, await store._site(conn, site_id), token, user)
         return status(await reasons(conn, site_id))

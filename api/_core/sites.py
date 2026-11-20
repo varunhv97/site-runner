@@ -338,13 +338,21 @@ class Sites:
             raise SiteError("site not found", 404)
         return row
 
-    async def public_meta(self, site_id: str, conn=None) -> dict:
+    async def public_meta(self, site_id: str, conn=None, publishers: bool = False) -> dict:
+        """The site and its versions. publishers: each version's publisher email too (for its owner and members
+        only, never the public GET /api/sites/<id>)."""
         await self._ready()
         if conn is None:
             async with self.engine.connect() as c:
-                return await self.public_meta(site_id, c)
+                return await self.public_meta(site_id, c, publishers)
         site = await self._site(conn, site_id)
-        rows = (await conn.execute(select(versions).where(versions.c.site_id == site_id).order_by(versions.c.n))).all()
+        q = (
+            select(versions, users.c.email.label("publisher_email"))
+            .select_from(versions.outerjoin(users, users.c.sub == versions.c.published_by))
+            .where(versions.c.site_id == site_id)
+            .order_by(versions.c.n)
+        )
+        rows = (await conn.execute(q)).all()
         return {
             "id": site.id,
             "slug": await self._current_slug(conn, site_id),
@@ -359,24 +367,33 @@ class Sites:
                     "size": v.size,
                     "files": v.files,
                 }
+                | ({"published_by_email": v.publisher_email} if publishers else {})
                 for v in rows
             ],
         }
 
-    async def user_sites(self, sub: str) -> list[dict]:
+    async def user_sites(self, user: dict) -> list[dict]:
+        """The account's sites (role "owner") and then the sites it is a member of (role "member")."""
         await self._ready()
-        async with self.engine.connect() as conn:
-            ids = (
-                await conn.execute(
-                    select(sites.c.id)
-                    .where(sites.c.owner == sub, sites.c.deleted_at.is_(None))
-                    .order_by(sites.c.created_at)
-                )
-            ).scalars()
-            return [await self.public_meta(i, conn) for i in ids]
-
-    async def list_user_sites(self, sub: str) -> list[str]:
-        return [s["id"] for s in await self.user_sites(sub)]
+        sub = user["sub"]
+        async with self.engine.begin() as conn:
+            await self._accept_invites(conn, user)  # an invite to this email may have arrived since it signed in
+            live = sites.c.deleted_at.is_(None)
+            owned = select(sites.c.id).where(sites.c.owner == sub, live).order_by(sites.c.created_at)
+            shared = (
+                select(sites.c.id)
+                .select_from(sites.join(site_members, site_members.c.site_id == sites.c.id))
+                .where(self._member_of(user), live, or_(sites.c.owner.is_(None), sites.c.owner != sub))
+                .order_by(sites.c.created_at)
+            )
+            out = []
+            for role, q in (("owner", owned), ("member", shared)):
+                for site_id in list((await conn.execute(q)).scalars()):
+                    owner = select(users.c.email).select_from(sites.join(users, users.c.sub == sites.c.owner))
+                    owner_email = (await conn.execute(owner.where(sites.c.id == site_id))).scalar()
+                    meta = await self.public_meta(site_id, conn, publishers=True)
+                    out.append(meta | {"role": role, "owner_email": owner_email})
+            return out
 
     async def resolve(self, ref: str, n: int | None, slugs: bool = True) -> dict:
         """The version to serve for a random id or link name: version n, or the live one. 404 when none,
@@ -417,12 +434,38 @@ class Sites:
     # ---- writing ----
 
     def check_access(self, site, token: str | None, user: dict | None = None) -> None:
-        """The site's owner (signed in) or anyone holding its edit token (API, MCP) may change it."""
+        """Owner-only changes (rename, delete versions, unpublish, rotate the token): the site's owner (signed in)
+        or anyone holding its edit token (API, MCP)."""
         if user and site.owner == user["sub"]:
             return
         if token and hmac.compare_digest(_hash_token(token), site.token_hash):
             return
         raise SiteError("sign in as the site's owner or send its edit token", 403)
+
+    @staticmethod
+    def _member_of(user: dict):
+        """site_members rows that are this account's: its sub, or a pending invite to its verified email."""
+        email = (user.get("email") or "").strip().lower()
+        cond = site_members.c.sub == user["sub"]
+        return or_(cond, and_(site_members.c.sub.is_(None), site_members.c.email == email)) if email else cond
+
+    async def can_edit(self, conn, site, user: dict | None) -> bool:
+        """The site's owner or one of its members (site_members): they may publish, make a version live, change
+        the start page and pull files."""
+        if not user:
+            return False
+        if site.owner == user["sub"]:
+            return True
+        q = select(site_members.c.email).where(site_members.c.site_id == site.id, self._member_of(user))
+        return (await conn.execute(q.limit(1))).first() is not None
+
+    async def check_edit(self, conn, site, token: str | None, user: dict | None = None) -> None:
+        """can_edit, or the site's edit token."""
+        if await self.can_edit(conn, site, user):
+            return
+        if token and hmac.compare_digest(_hash_token(token), site.token_hash):
+            return
+        raise SiteError("sign in as the site's owner or a member, or send its edit token", 403)
 
     async def _store_files(self, upload: Upload) -> None:
         """Put the upload's files in storage. Done before the metadata, so a version never points at a
@@ -606,14 +649,14 @@ class Sites:
         await self._ready()
         async with self.engine.connect() as conn:  # check access before spending storage on the upload
             site = await self._site(conn, site_id)
-            self.check_access(site, token, user)
+            await self.check_edit(conn, site, token, user)
         upload = Upload(zip_bytes, entry)
         await self._check_quota(site.owner, upload)  # the owner's quota, also when a token holder publishes
         await self._store_files(upload)
         try:
             async with self.engine.begin() as conn:
                 site = await self._site(conn, site_id, lock=True)  # serialises publishes to one site
-                self.check_access(site, token, user)
+                await self.check_edit(conn, site, token, user)
                 count = (await conn.execute(select(func.count()).where(versions.c.site_id == site_id))).scalar_one()
                 if count >= MAX_VERSIONS_PER_SITE:
                     raise SiteError(
@@ -631,7 +674,7 @@ class Sites:
     async def set_live(self, site_id: str, token: str | None, n: int, user: dict | None = None) -> dict:
         await self._ready()
         async with self.engine.begin() as conn:
-            self.check_access(await self._site(conn, site_id, lock=True), token, user)
+            await self.check_edit(conn, await self._site(conn, site_id, lock=True), token, user)
             exists = (
                 await conn.execute(select(versions.c.n).where(versions.c.site_id == site_id, versions.c.n == n))
             ).first()
@@ -641,10 +684,10 @@ class Sites:
             return await self.public_meta(site_id, conn)
 
     async def version_files(self, site_id: str, token: str | None, n: int, user: dict | None = None) -> dict:
-        """A shared version's files (path -> digest) and start page, for its owner to take back into a browser."""
+        """A shared version's files (path -> digest) and start page, for its owner or a member to pull."""
         await self._ready()
         async with self.engine.connect() as conn:
-            self.check_access(await self._site(conn, site_id), token, user)
+            await self.check_edit(conn, await self._site(conn, site_id), token, user)
             row = (await conn.execute(select(versions).where(versions.c.site_id == site_id, versions.c.n == n))).first()
             if row is None:
                 raise SiteError("no such version", 404)
@@ -658,7 +701,7 @@ class Sites:
         """One file's original bytes, only when one of this site's versions uses it."""
         await self._ready()
         async with self.engine.connect() as conn:
-            self.check_access(await self._site(conn, site_id), token, user)
+            await self.check_edit(conn, await self._site(conn, site_id), token, user)
             q = select(version_files.c.digest).where(
                 version_files.c.site_id == site_id, version_files.c.digest == digest
             )
@@ -673,7 +716,7 @@ class Sites:
         """Change which page a shared version opens on (its live and pinned links)."""
         await self._ready()
         async with self.engine.begin() as conn:
-            self.check_access(await self._site(conn, site_id, lock=True), token, user)
+            await self.check_edit(conn, await self._site(conn, site_id, lock=True), token, user)
             q = select(version_files.c.path).where(version_files.c.site_id == site_id, version_files.c.n == n)
             paths = set((await conn.execute(q)).scalars())
             if not paths:
