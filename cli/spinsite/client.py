@@ -1,5 +1,7 @@
 """Async client for the Site Runner share API, authenticated with an account API token (srk_...)."""
 
+from urllib.parse import quote
+
 import httpx
 
 from . import __version__
@@ -38,6 +40,21 @@ class Client:
             message = body.get("error") if isinstance(body, dict) else None
             raise ApiError(message or f"request failed ({res.status_code})", res.status_code)
         return body
+
+    async def _raw(self, url: str) -> bytes:
+        """A GET whose body is bytes (a site file), with the same error handling as _call."""
+        try:
+            res = await self._http.get(url)
+        except httpx.HTTPError as e:
+            raise ApiError(f"can't reach {self.base_url}: {e}") from e
+        if res.status_code >= 400:
+            try:
+                body = res.json()
+            except ValueError:
+                body = {}
+            message = body.get("error") if isinstance(body, dict) else None
+            raise ApiError(message or f"request failed ({res.status_code})", res.status_code)
+        return res.content
 
     # ---- account ----
 
@@ -87,3 +104,23 @@ class Client:
 
     async def delete_site(self, site_id: str) -> None:
         await self._call("DELETE", f"/api/sites/{site_id}")
+
+    # ---- pulling (owner or member) ----
+
+    async def version_files(self, site_id: str, n: int) -> dict:
+        """{n, entry, files: {path: sha256}} for one version."""
+        return await self._call("GET", f"/api/sites/{site_id}/versions/{n}/files")
+
+    async def file_bytes(self, site_id: str, digest: str) -> bytes:
+        return await self._raw(f"/api/sites/{site_id}/files/{digest}")
+
+    # ---- members (owner; a member may remove itself) ----
+
+    async def members(self, site_id: str) -> dict:
+        return await self._call("GET", f"/api/sites/{site_id}/members")
+
+    async def invite(self, site_id: str, email: str) -> dict:
+        return await self._call("POST", f"/api/sites/{site_id}/members", json={"email": email})
+
+    async def remove_member(self, site_id: str, email: str) -> None:
+        await self._call("DELETE", f"/api/sites/{site_id}/members/{quote(email.strip(), safe='')}")
