@@ -381,13 +381,20 @@ async def add_version(
     file: UploadFile = File(...),
     note: str = Form(""),
     entry: str = Form(""),
+    base_version: int = Form(0),
     authorization: str | None = Header(None),
 ):
     _check_origin(request)
     user = await _current_user(request)
     await _can_share(user, site_id)
     meta = await sites.add_version(
-        site_id, _bearer(authorization), await file.read(), note, user=user, entry=entry or None
+        site_id,
+        _bearer(authorization),
+        await file.read(),
+        note,
+        user=user,
+        entry=entry or None,
+        base_version=base_version or None,
     )
     return {
         "site": meta,

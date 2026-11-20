@@ -153,7 +153,8 @@ async def deploy(
                 raise PullError(stale.replace("use force", "call deploy with force=true"))
             same = state and state.get("site_id") == existing["id"]
             chosen = default_entry(target, state, entry) if same else entry
-            return await c.add_version(existing["id"], zipped, note=note, entry=chosen)
+            base = state.get("version") or 0 if same and not force else 0  # the server re-checks it atomically
+            return await c.add_version(existing["id"], zipped, note=note, entry=chosen, base_version=base)
         default = name or (target.stem if target.is_file() else target.name) or "site"
         return await c.create_site(zipped, name=default[:100], slug=slug.strip().lower(), note=note, entry=entry)
 

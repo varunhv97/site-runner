@@ -87,11 +87,13 @@ class Client:
         data = {"name": name, "slug": slug, "note": note, "entry": entry}
         return await self._call("POST", "/api/sites", files={"file": ("site.zip", zipped)}, data=data)
 
-    async def add_version(self, site_id: str, zipped: bytes, note: str = "", entry: str = "") -> dict:
+    async def add_version(
+        self, site_id: str, zipped: bytes, note: str = "", entry: str = "", base_version: int = 0
+    ) -> dict:
+        """`base_version`: the version this was pulled from; the server refuses (409) if a newer one went live."""
         files = {"file": ("site.zip", zipped)}
-        return await self._call(
-            "POST", f"/api/sites/{site_id}/versions", files=files, data={"note": note, "entry": entry}
-        )
+        data = {"note": note, "entry": entry, "base_version": str(base_version)}
+        return await self._call("POST", f"/api/sites/{site_id}/versions", files=files, data=data)
 
     async def set_live(self, site_id: str, n: int) -> dict:
         return (await self._call("POST", f"/api/sites/{site_id}/live", json={"version": n}))["site"]

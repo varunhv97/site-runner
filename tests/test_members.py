@@ -142,6 +142,17 @@ def test_member_publishes_makes_live_changes_entry_and_pulls(client, monkeypatch
     assert client.get(f"/api/sites/{sid}/hold").json() == {"held": False}
 
 
+def test_publish_based_on_an_old_version_is_refused(client, monkeypatch):
+    sid = shared_with_bob(client, monkeypatch)
+    url = f"/api/sites/{sid}/versions"
+    assert upload(client, {}, {"index.html": "bob"}, url=url, base_version="1").json()["site"]["live"] == 2
+    sign_in(client, monkeypatch, ALICE)  # Alice also started from v1, but Bob's v2 went live first
+    r = upload(client, {}, {"index.html": "alice"}, url=url, base_version="1")
+    assert r.status_code == 409 and "v2 went live after v1" in r.json()["error"]
+    assert upload(client, {}, {"index.html": "alice"}, url=url, base_version="2").json()["site"]["live"] == 3
+    assert upload(client, {}, {"index.html": "forced"}, url=url).json()["site"]["live"] == 4  # no base: replaces
+
+
 def test_member_is_refused_owner_only_routes(client, monkeypatch):
     sid = shared_with_bob(client, monkeypatch)
     assert upload(client, {}, url=f"/api/sites/{sid}/versions").status_code == 200

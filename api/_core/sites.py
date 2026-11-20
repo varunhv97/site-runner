@@ -645,7 +645,10 @@ class Sites:
         note: str = "",
         user: dict | None = None,
         entry: str | None = None,
+        base_version: int | None = None,
     ) -> dict:
+        """With `base_version` (the version the publisher started from), refuse with 409 if a newer version went
+        live since, so two collaborators publishing at once can't silently replace each other."""
         await self._ready()
         async with self.engine.connect() as conn:  # check access before spending storage on the upload
             site = await self._site(conn, site_id)
@@ -657,6 +660,12 @@ class Sites:
             async with self.engine.begin() as conn:
                 site = await self._site(conn, site_id, lock=True)  # serialises publishes to one site
                 await self.check_edit(conn, site, token, user)
+                if base_version is not None and (site.live or 0) > base_version:
+                    raise SiteError(
+                        f"v{site.live} went live after v{base_version}, which this was based on; "
+                        "pull the latest first, or publish without a base version to replace it",
+                        409,
+                    )
                 count = (await conn.execute(select(func.count()).where(versions.c.site_id == site_id))).scalar_one()
                 if count >= MAX_VERSIONS_PER_SITE:
                     raise SiteError(

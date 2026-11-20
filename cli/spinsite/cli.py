@@ -175,8 +175,10 @@ def deploy(
         if target:
             if not force and (stale := stale_message(target, state, path)):
                 raise PullError(stale.replace("use force", "use --force"))
-            chosen = default_entry(folder, state, entry) if state and state.get("site_id") == target["id"] else entry
-            return await c.add_version(target["id"], zipped, note=note, entry=chosen), True
+            same = bool(state and state.get("site_id") == target["id"])
+            chosen = default_entry(folder, state, entry) if same else entry
+            base = state.get("version") or 0 if same and not force else 0  # the server re-checks it atomically
+            return await c.add_version(target["id"], zipped, note=note, entry=chosen, base_version=base), True
         default_name = name or _folder_name(path)
         return await c.create_site(zipped, name=default_name, slug=slug, note=note, entry=entry), False
 
