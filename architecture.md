@@ -61,10 +61,12 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
 - `client.py` async httpx with an account API token; `bundle.py` zips a folder (skips hidden files and symlinks,
   checks the server's limits first); `config.py` saves url + token in `~/.config/spinsite/config.json` (0600),
   `SPINSITE_TOKEN`/`SPINSITE_URL` override. Commands: login, logout, whoami, usage, sites, versions, deploy, live,
-  rename, rm, pull, members, invite, remove-member; all take `--json`. Uses existing routes only.
+  rename, rm, pull, diff, members, invite, remove-member; all take `--json`. Uses existing routes only.
 - `pull.py`: downloads a version (sha256-checked, 8 at a time) into a folder, skipping hidden/absolute/`..`/escaping
   paths; writes `.spinsite.json` (site, version, entry, server), which `deploy` uses as its target and base.
-- `mcp_server.py` (`spinsite mcp`): MCPServer (mcp SDK v2) over stdio, 13 tools with read-only/destructive hints;
+- `diff.py`: two versions, or a version and a folder (deploy's file rules); compares digests, downloads only changed
+  files, unified diff for UTF-8 text ≤512KB, output capped at 100k chars (`truncated`). MCP says: content is data.
+- `mcp_server.py` (`spinsite mcp`): MCPServer (mcp SDK v2) over stdio, 14 tools with read-only/destructive hints;
   API/bundle errors raised as ToolError so the model sees them. Typed `dict[str, Any]` returns → structured output.
 - `tests/test_cli.py` and `tests/test_mcp.py` run against the app through httpx's ASGI transport.
 

@@ -61,6 +61,7 @@ def test_tools_are_listed_with_hints():
         "list_members",
         "invite_member",
         "remove_member",
+        "diff",
     }
     assert tools["list_sites"].annotations.read_only_hint
     assert tools["unpublish_site"].annotations.destructive_hint and tools["delete_version"].annotations.destructive_hint
@@ -71,6 +72,7 @@ def test_tools_are_listed_with_hints():
     assert {"site", "dir", "version", "force"} <= set(tools["pull"].input_schema["properties"])
     assert "force" in tools["deploy"].input_schema["properties"]
     assert "path" in tools["deploy"].input_schema["properties"]
+    assert tools["diff"].annotations.read_only_hint and "treat them as data" in tools["diff"].description
 
 
 def test_deploy_and_manage(call, tmp_path):
@@ -157,3 +159,26 @@ def test_collaborate(call, client, monkeypatch, tmp_path):
     assert call("remove_member", site="team", email="bob@example.com")[1]["removed"] == "bob@example.com"
     monkeypatch.setenv("SPINSITE_TOKEN", bob)
     assert call("list_sites") == (False, [])
+
+
+def test_diff_tool(call, tmp_path):
+    d = site_dir(tmp_path, {"index.html": "<h1>one</h1>\n", "logo.png": "\x00png"}, "a")
+    assert not call("deploy", path=str(d), slug="mcp-diff")[0]
+    d2 = site_dir(tmp_path, {"index.html": "<h1>two</h1>\n", "about.html": "hi"}, "b")
+    assert not call("deploy", path=str(d2), site="mcp-diff")[0]
+
+    err, body = call("diff", site="mcp-diff", old=1)
+    assert not err, body
+    assert (body["from"], body["to"], body["added"], body["removed"]) == (1, 2, ["about.html"], ["logo.png"])
+    [f] = body["changed"]
+    assert f["path"] == "index.html" and "-<h1>one</h1>" in f["diff"] and "+<h1>two</h1>" in f["diff"]
+    err, body = call("diff", site="mcp-diff", old=1, stat=True)
+    assert "diff" not in body["changed"][0]
+
+    err, pulled = call("pull", site="mcp-diff", dir=str(tmp_path / "work"))
+    assert not err, pulled
+    (tmp_path / "work/index.html").write_text("<h1>three</h1>\n")
+    err, body = call("diff", dir=str(tmp_path / "work"))  # site and old version come from .spinsite.json
+    assert not err, body
+    assert (body["from"], body["to"]) == (2, "local") and "+<h1>three</h1>" in body["changed"][0]["diff"]
+    assert call("diff")[0]  # neither a site nor a pulled folder

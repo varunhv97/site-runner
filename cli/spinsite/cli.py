@@ -14,6 +14,7 @@ import typer
 from . import config
 from .bundle import BundleError, bundle
 from .client import ApiError, Client
+from .diff import diff as diff_versions
 from .pull import PullError, after_deploy, default_entry, pull as pull_version, read_state, stale_message, target_site
 
 app = typer.Typer(
@@ -214,6 +215,47 @@ def pull(
         typer.secho(f"warning: skipped {len(body['skipped'])} hidden or unsafe paths", err=True, fg="yellow")
     text += f"\nEdit, then: spinsite deploy {body['dir']}"
     out(as_json, body, text)
+
+
+@app.command()
+def diff(
+    site: Annotated[str, typer.Argument(help="Site id, link name or name (default: the --folder's pulled site).")] = "",
+    old: Annotated[
+        int | None, typer.Option("--from", help="Older version (default: pulled version, else live).")
+    ] = None,
+    new: Annotated[int | None, typer.Option("--to", help="Newer version (default: live).")] = None,
+    folder: Annotated[str, typer.Option(help="Compare with this folder instead: what a deploy would change.")] = "",
+    path: Annotated[str, typer.Option(help="Only this file or folder.")] = "",
+    context: Annotated[int, typer.Option(help="Lines of context around each change.")] = 3,
+    stat: Annotated[bool, typer.Option("--stat", help="Only list the files, no line diffs.")] = False,
+    as_json: JsonOpt = False,
+):
+    """Show what changed between two versions of a site, or between a version and a local folder."""
+    state = read_state(folder) if folder else None
+    if not site and not state:
+        _fail("name a site, or pass --folder with a pulled folder")
+
+    async def go(c: Client):
+        s = await c.find_site(site) if site else await c.find_site(state["site_id"])
+        start = old or (state.get("version") if state and state.get("site_id") == s["id"] else None)
+        return await diff_versions(c, s, start, new, folder or None, path, context)
+
+    body = run(go)
+    if stat:
+        for f in body["changed"]:
+            f.pop("diff", None)
+    lines = [f"{body['name']}: v{body['from']} → {'v' if body['to'] != 'local' else ''}{body['to']}"]
+    lines += [f"  added    {p}" for p in body["added"]] + [f"  removed  {p}" for p in body["removed"]]
+    for f in body["changed"]:
+        what = f"+{f['added_lines']} -{f['removed_lines']}" if f["kind"] == "text" else f["kind"].replace("_", " ")
+        lines.append(f"  changed  {f['path']} ({what})")
+    if not (body["added"] or body["removed"] or body["changed"]):
+        lines.append("  no changes")
+    if not stat:
+        lines += ["", *(f["diff"] for f in body["changed"] if f.get("diff"))]
+    if body["truncated"]:
+        lines.append("(some diffs left out: too long; use --path to see one file)")
+    out(as_json, body, "\n".join(lines).rstrip())
 
 
 def _folder_name(path: str) -> str:
