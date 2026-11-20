@@ -122,3 +122,17 @@ def test_concurrent_cold_starts(engine):
             return await conn.run_sync(lambda c: inspect(c).get_table_names())
 
     assert "alembic_version" in run(tables())
+
+
+def test_concurrent_first_requests_migrate_once(tmp_path):
+    """A cold process serving parallel requests must not run Alembic twice at once (its context is global)."""
+    from _core.sites import Sites
+    from _core.storage import LocalStorage
+
+    sites = Sites(LocalStorage(str(tmp_path / "files")), make_engine(f"sqlite:///{tmp_path}/c.db"))
+
+    async def go():
+        await asyncio.gather(*(sites._ready() for _ in range(8)))
+
+    run(go())
+    assert sites._schema_ready

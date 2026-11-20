@@ -1,5 +1,6 @@
 """Site/version logic: zip validation, files in Blob storage (by sha256), metadata in the database."""
 
+import asyncio
 import hashlib
 import hmac
 import io
@@ -242,11 +243,15 @@ class Sites:
         self.storage = storage
         self.engine = engine
         self._schema_ready = False
+        self._schema_lock = asyncio.Lock()  # Alembic's context is global: one migrate per process at a time
 
     async def _ready(self) -> None:
-        if not self._schema_ready:
-            await migrate(self.engine)
-            self._schema_ready = True
+        if self._schema_ready:
+            return
+        async with self._schema_lock:
+            if not self._schema_ready:
+                await migrate(self.engine)
+                self._schema_ready = True
 
     def _upsert(self, table):
         dialect = postgresql if self.engine.dialect.name == "postgresql" else sqlite
