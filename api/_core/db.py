@@ -104,6 +104,24 @@ site_members = Table(
     Index("ix_site_members_sub", "sub"),
 )
 
+# One-time invite links (_core/invite_links.py): the owner shares /join#<code>; the first signed-in account to redeem
+# it within an hour becomes a member. Only the code's sha256 is stored.
+invite_links = Table(
+    "invite_links",
+    metadata,
+    Column("id", String(16), primary_key=True),
+    Column("site_id", String(16), nullable=False),
+    Column("token_hash", String(64), nullable=False, unique=True),
+    Column("created_by", String(255), nullable=False),  # the owner's sub
+    Column("created_at", Integer, nullable=False),
+    Column("expires_at", Integer, nullable=False),
+    Column("used_at", Integer, nullable=True),
+    Column("used_by", String(255), nullable=True),  # the redeeming account's sub
+    Column("revoked_at", Integer, nullable=True),
+    ForeignKeyConstraint(["site_id"], ["sites.id"], ondelete="CASCADE"),
+    Index("ix_invite_links_site", "site_id"),
+)
+
 uploads = Table(
     "uploads",
     metadata,
