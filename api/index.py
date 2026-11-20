@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response  # noqa: 
 from pydantic import BaseModel  # noqa: E402
 from sqlalchemy.exc import OperationalError  # noqa: E402
 
-from _core import abuse, api_tokens, auth, hosts  # noqa: E402
+from _core import abuse, api_tokens, auth, hosts, members  # noqa: E402
 from _core.content import CONTENT_HEADERS, held, make_content_app, not_found  # noqa: E402
 from _core.db import make_engine  # noqa: E402
 from _core.sites import SiteError, Sites, is_admin  # noqa: E402
@@ -505,6 +505,38 @@ async def claim_site(request: Request, site_id: str, authorization: str | None =
     await _can_share(user, site_id)
     meta = await sites.claim(site_id, _bearer(authorization), user)
     return {"site": meta}
+
+
+# ---- Members (collaborators; _core/members.py) ----
+
+
+class MemberBody(BaseModel):
+    email: str
+
+
+@app.get("/api/sites/{site_id}/members")
+async def list_site_members(request: Request, site_id: str):
+    """The owner's email and the members (accepted or pending), for the owner."""
+    return await members.list_members(sites, site_id, await _current_user(request))
+
+
+@app.post("/api/sites/{site_id}/members")
+async def invite_site_member(request: Request, site_id: str, body: MemberBody):
+    """Invite a Google account by email to publish to and pull from the site (owner only)."""
+    _check_origin(request)
+    user = await _current_user(request)
+    if not user:
+        raise SiteError("sign in to manage a site's members", 401)
+    await _can_share(user, site_id)
+    return await members.invite(sites, site_id, body.email, user)
+
+
+@app.delete("/api/sites/{site_id}/members/{email}")
+async def remove_site_member(request: Request, site_id: str, email: str):
+    """The owner removes a member, or a member leaves."""
+    _check_origin(request)
+    await members.remove(sites, site_id, email, await _current_user(request))
+    return {"ok": True}
 
 
 @app.get("/api/sites/{site_id}")

@@ -93,9 +93,11 @@ def test_existing_database_without_alembic_version_is_stamped_and_upgraded(engin
 
     async def rows():
         async with engine.connect() as conn:
-            return (await conn.execute(text("SELECT id, name FROM sites"))).all()
+            q = "SELECT s.id, s.name, v.n, v.published_by FROM sites s JOIN versions v ON v.site_id = s.id"
+            return (await conn.execute(text(q))).all(), (await conn.execute(text("SELECT * FROM site_members"))).all()
 
-    assert [tuple(r) for r in run(rows())] == [("abc123", "Old site")]  # data kept
+    old, members = run(rows())
+    assert [tuple(r) for r in old] == [("abc123", "Old site", 1, None)] and members == []  # data kept
 
 
 def test_migrate_twice_is_a_no_op(engine):

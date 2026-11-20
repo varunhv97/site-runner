@@ -13,7 +13,7 @@ import string
 import time
 import zipfile
 
-from sqlalchemy import delete, func, select, union_all, update
+from sqlalchemy import and_, delete, func, or_, select, union_all, update
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import IntegrityError
 
@@ -22,6 +22,7 @@ from .db import (
     blobs,
     deleted_versions,
     migrate,
+    site_members,
     sites,
     slugs,
     uploads,
@@ -259,6 +260,17 @@ class Sites:
         stmt = self._upsert(users).values(sub=user["sub"], email=user.get("email", ""), created_at=int(time.time()))
         async with self.engine.begin() as conn:
             await conn.execute(stmt.on_conflict_do_update(index_elements=["sub"], set_={"email": stmt.excluded.email}))
+            await self._accept_invites(conn, user)
+
+    async def _accept_invites(self, conn, user: dict) -> None:
+        """Pending invites (site_members) to this account's verified Google email become its own."""
+        email = (user.get("email") or "").strip().lower()
+        if email:
+            await conn.execute(
+                update(site_members)
+                .where(site_members.c.email == email, site_members.c.sub.is_(None))
+                .values(sub=user["sub"])
+            )
 
     async def _count_upload(self, conn, key: str | None) -> None:
         """Atomically count an upload against today's limit. key: a user's sub, or "site:<id>" for an
@@ -488,7 +500,7 @@ class Sites:
                 413,
             )
 
-    async def _add_version(self, conn, site_id: str, upload: Upload, note: str) -> int:
+    async def _add_version(self, conn, site_id: str, upload: Upload, note: str, published_by: str | None) -> int:
         # numbers of deleted versions are never reused, so a pinned link can't change what it shows
         used = union_all(
             select(versions.c.n).where(versions.c.site_id == site_id),
@@ -506,6 +518,7 @@ class Sites:
                 entry=entry,
                 size=size,
                 files=len(manifest),
+                published_by=published_by,
             )
         )
         await conn.execute(
@@ -555,7 +568,7 @@ class Sites:
             )
             if slug:
                 await self._claim_slug(conn, site_id, slug)
-            await self._add_version(conn, site_id, upload, note)
+            await self._add_version(conn, site_id, upload, note, owner["sub"] if owner else None)
             meta = await self.public_meta(site_id, conn)
         return meta, token
 
@@ -610,7 +623,7 @@ class Sites:
                     )
                 # the publisher, else (an edit token) the site's owner, else the site itself
                 await self._count_upload(conn, user["sub"] if user else site.owner or f"site:{site_id}")
-                await self._add_version(conn, site_id, upload, note)
+                await self._add_version(conn, site_id, upload, note, user["sub"] if user else None)
                 return await self.public_meta(site_id, conn)
         except IntegrityError as e:  # two publishes raced for the same version number (SQLite has no row lock)
             raise SiteError("another version was published at the same moment; try again", 409) from e

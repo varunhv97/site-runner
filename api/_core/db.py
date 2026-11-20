@@ -59,6 +59,7 @@ versions = Table(
     Column("entry", Text, nullable=False),
     Column("size", Integer, nullable=False),
     Column("files", Integer, nullable=False),
+    Column("published_by", String(255), nullable=True),  # the publisher's Google sub; None for an edit token
     ForeignKeyConstraint(["site_id"], ["sites.id"], ondelete="CASCADE"),
 )
 
@@ -83,6 +84,21 @@ slugs = Table(
     Column("created_at", Integer, nullable=False),
     ForeignKeyConstraint(["site_id"], ["sites.id"], ondelete="CASCADE"),
     Index("ix_slugs_site", "site_id"),
+)
+
+# Collaborators (_core/members.py): accounts the owner invited by Google email to publish to and pull from a site.
+# sub is filled in once an account with that verified email is known (signs in); until then the invite is pending.
+site_members = Table(
+    "site_members",
+    metadata,
+    Column("site_id", String(16), primary_key=True),
+    Column("email", String(320), primary_key=True),  # lower-cased
+    Column("sub", String(255), nullable=True),
+    Column("invited_by", String(255), nullable=False),  # the owner's sub
+    Column("created_at", Integer, nullable=False),
+    ForeignKeyConstraint(["site_id"], ["sites.id"], ondelete="CASCADE"),
+    Index("ix_site_members_email", "email"),
+    Index("ix_site_members_sub", "sub"),
 )
 
 uploads = Table(

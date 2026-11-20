@@ -95,13 +95,15 @@ def site_ref_from_url(url: str, base_url: str) -> str:
     return ref.lower()
 
 
-async def _hit_rate_limit(sites, conn, key: str, limit: int) -> None:
+async def _hit_rate_limit(
+    sites, conn, key: str, limit: int, message: str = "Too many reports from your network. Try again in an hour."
+) -> None:
     stmt = sites._upsert(rate_limits).values(key=key[:300], window=_window(), count=1)
     stmt = stmt.on_conflict_do_update(
         index_elements=["key", "window"], set_={"count": rate_limits.c.count + 1}
     ).returning(rate_limits.c.count)
     if (await conn.execute(stmt)).scalar_one() > limit:
-        raise SiteError("Too many reports from your network. Try again in an hour.", 429)
+        raise SiteError(message, 429)
 
 
 async def _bump(sites, key: str, window: str) -> int:
