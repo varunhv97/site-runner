@@ -15,6 +15,8 @@ Keep **versions** of each site. Optionally **share** a version via a public link
   One host per site; renaming moves it (visitors' saved data starts fresh).
 - Account API tokens for CLI/MCP clients (create, list, revoke in /app).
 - `spinsite` CLI (`cli/`): deploy, sites, versions, live, rename, rm, usage. `spinsite mcp` serves them as MCP tools; guide at /docs.
+- Collaborators: the owner invites up to 10 Google accounts by email; members publish, make live, change the start
+  page and pull versions. Rename, delete versions, unpublish, edit token and members stay the owner's.
 
 ## Key decisions
 - **Local-first.** Nothing leaves the device until you click Share.
@@ -26,4 +28,6 @@ Keep **versions** of each site. Optionally **share** a version via a public link
 - **Limits:** 4MB zipped per share (Vercel function body limit), 50MB unzipped, 2000 files; 250MB storage per
   account (`STORAGE_QUOTA_MB`; a file shared by many versions counts once). Shared versions that aren't live can be
   deleted (their pinned link 404s; numbers are never reused).
+- **Collaborators** share the owner's storage quota; the daily upload limit is the publisher's. Latest publish wins.
+- Schema changes go through Alembic migrations, applied automatically on first use.
 - Stack: Next.js 16 frontend + FastAPI (Vercel Python function), Vercel Blob storage in prod.

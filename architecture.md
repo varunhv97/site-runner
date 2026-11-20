@@ -13,17 +13,15 @@ spinsite.app (app origin: cookies, IndexedDB with edit tokens; never runs user H
                          link name, else its id (hosts.site_label); the id and earlier names 308 there
 p-<local id>.<UC>        one local preview: /__sr/boot + /__sr/sw.js from the server, the rest from the worker
 api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path rules) · preview/*.js (boot, worker)
-           sites.py (zips, versions, limits) · db.py (Postgres | SQLite) · storage.py (Blob | .data/)
+           sites.py (zips, versions, limits) · db.py (Postgres | SQLite; migrations/) · storage.py (Blob | .data/)
+           members.py (collaborators)
            abuse.py (reports, bans, rate limit) · scan.py (executables; phishing/seed/miner) · holds.py (451 until reviewed)
 ```
 `<UC>` = `USERCONTENT_BASE_DOMAIN` (`sites.spinsite.app`; dev `usercontent.localhost:8001`).
 
 ## Landing page
-- Built with the taste-skill (`~/.claude/skills/design-taste-frontend`). Kit copied to `public/assets`
-  (no photos/objects/scenes). Dealt: split hero, gradient-mesh effect, pinned-chapters moment, palette
-  forest-pale-lime, type Gabarito + Figtree + DM Mono, radius sharp, pill buttons.
-- `next.config.ts` rewrites `/` → `/index.html`. The tool reuses the same tokens in `app/globals.css`.
-- Checks: `node <skill>/scripts/gate.mjs public/index.html` (run from the project root).
+- Taste-skill build (kit in `public/assets`; split hero, gradient mesh, pinned chapters, forest-pale-lime, Gabarito +
+  Figtree + DM Mono). `/` rewrites to `/index.html`; /app reuses the tokens. Check: `node <skill>/scripts/gate.mjs`.
 
 ## Origins and routing
 - `HostRouter` (api/index.py) dispatches by the Host header only (never X-Forwarded-Host). Hosts under `<UC>` reach
@@ -69,12 +67,15 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
 - `tests/test_cli.py` and `tests/test_mcp.py` run against the app through httpx's ASGI transport.
 
 ## Data (server)
-- **Database** (`_core/db.py`): `sites` (owner, token hash, live version, deleted_at), `versions`,
+- **Database** (`_core/db.py`): `sites` (owner, token hash, live version, deleted_at), `versions` (+ `published_by` sub),
   `version_files` (site, version, path → sha256), `slugs` (link names, never deleted; newest = current),
   `users`, `api_tokens`, `uploads` (per user per day), `blobs` (digest → size), `deleted_versions` (site, n: never reused),
-  `reports`, `bans`, `rate_limits` (abuse, below), `holds` (upload safety, below). `/s/<ref>` resolves a random id first, then a link name (old names too), then 308s to the id host.
+  `reports`, `bans`, `rate_limits` (abuse, below), `holds` (upload safety, below), `site_members`. `/s/<ref>` resolves a random id first, then a link name (old names too), then 308s to the id host.
   Publishing is one transaction with the site row locked (`FOR UPDATE`); serving a file is one indexed lookup.
-  Schema is created on first use (`create_all`); add migrations (Alembic) before changing columns.
+- **Migrations** (Alembic, `_core/migrations/versions`; write new ones with `alembic revision --autogenerate`): `db.migrate()`
+  runs on first use per process, in one transaction holding `pg_advisory_xact_lock` (safe behind PgBouncer), so
+  concurrent cold starts wait and then find nothing to do. A DB without `alembic_version` but with `sites` (made by
+  the old `create_all`) is stamped at `0001` (baseline) first. `tests/test_migrations.py` (set `TEST_POSTGRES_URL` for PG).
 - **Blob** (`_core/storage.py`): only `blobs/<sha256>` file contents. Private store (`BLOB_ACCESS`); the token is
   needed for every read. Files never change, so reads use the CDN cache.
 - Neon: use the pooled connection string; asyncpg runs with prepared statements off (PgBouncer) and NullPool.
@@ -87,18 +88,23 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
 - Cleanup: Vercel Cron calls `/api/cron/cleanup` daily (CRON_SECRET) and deletes blobs no published version uses
   (older than 1 hour), and drops their `blobs` rows.
 
+## Collaborators (`_core/members.py`)
+- `site_members` (site, lower-cased email, sub once known, invited_by): owner-only `GET/POST /api/sites/<id>/members`,
+  `DELETE …/members/<email>` (a member may leave). Max 10, 30 invites/hour. Invite = Google email; matches an account
+  whose verified email equals it (sub filled at sign-in or `/api/me/sites`). Session or API token, never edit token.
+- `Sites.can_edit` (owner or member) gates publish, live, entry, version files, site files, hold; everything else
+  stays owner/edit-token only (`check_access`). Quota: owner's; daily uploads: publisher's; bans: owner and member.
+- `/api/me/sites`: owned sites then member sites, each with `role`, `owner_email`, versions' `published_by_email`.
+
 ## Abuse (`_core/abuse.py`, `/report`, `/admin`)
-- `/report` (app origin) posts `POST /api/reports`: the link is parsed to a ref (`/s/<ref>` on PUBLIC_BASE_URL, or
-  `<ref>.<USERCONTENT_BASE_DOMAIN>`), resolved like `/s/`, stored in `reports` (status open/actioned/dismissed).
-- Rate limit: fixed one-hour window per client IP (X-Real-IP / X-Forwarded-For, set by Vercel) in `rate_limits`;
-  pruned by the cleanup cron.
+- `/report` posts `POST /api/reports`: the link (`/s/<ref>` or `<ref>.<UC>`) resolves like `/s/` into `reports`.
+- Rate limit: one-hour window per client IP (X-Real-IP / X-Forwarded-For) in `rate_limits`; pruned by the cron.
 - `/admin` (ADMIN_EMAILS) lists reports; Unpublish = the existing admin takedown, which also actions the site's reports.
-- `bans` (email, sub known at ban time): `index._can_share` runs before every share write and refuses a banned
-  user, or a write to a banned owner's site. A ban unpublishes the owner's sites (`deleted_by_admin`).
+- `bans` (email, sub): `index._can_share` before every share write refuses a banned user (owner or member) or a
+  write to a banned owner's site. A ban unpublishes the owner's sites (`deleted_by_admin`).
 
 ## Local data (IndexedDB `site-runner` v1)
-- `sites` (keyPath id): LocalSite incl. `versions[].manifest` and optional `remote {siteId, token, url, live, pushed}`
-- `files` (key = sha256): Blob
+`sites` (keyPath id: LocalSite, `versions[].manifest`, optional `remote {siteId, token, url, live, pushed}`); `files` (sha256 → Blob)
 
 ## Local preview hand-off (files never leave the browser)
 1. /app frames `p-<lid>.<UC>/__sr/boot` (`sandbox="allow-scripts allow-same-origin allow-forms allow-popups
@@ -109,8 +115,7 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
 3. Boot accepts files only from the app origin + parent/opener, writes them and a manifest to Cache Storage,
    acks `loaded`, drops `window.opener`, `location.replace("/")`. The worker serves `/…` with the shared path
    rules and the sandbox headers; `/__sr/*` always goes to the network.
-4. New tab = `window.open(boot)` with the same hand-off (top level has its own storage partition). No "ready"
-   within 8 s (Safari can block workers in frames) → /app offers "Open preview in a new tab".
+4. New tab = `window.open(boot)`, same hand-off. No "ready" in 8 s (Safari may block framed workers) → offer a new tab.
 5. public/sw.js only unregisters itself; /app removes old registrations and `sr-site-data:*` keys.
 
 ## Upload safety
@@ -118,9 +123,8 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
   compared by a test; plus PE/ELF/Mach-O/APK-JAR magic bytes). Content scan (`UPLOAD_SCAN`, default on) of HTML/JS
   (512KB a file, 4MB total): phishing needs a password field + two of brand / external credential target / known
   drop (Telegram bot, Discord webhook, form relays); "Sign in with Google" text doesn't count as a brand.
-- Findings → row in `holds` (site, n, reasons, status held/approved/rejected, reviewer). `Sites.resolve()` raises
-  451 while any row is held, so the content host (`content.py`) and the `/s/` redirect show "waiting for a safety review". Admins approve or reject
-  (reject = admin unpublish) via `/api/admin/holds`.
+- Findings → row in `holds` (site, n, reasons, status, reviewer). `Sites.resolve()` raises 451 while any row is held
+  (content host and `/s/` show "waiting for a safety review"). Admins approve or reject (= unpublish) via `/api/admin/holds`.
 - Client: `lib/executables.ts` (same list) blocks Share; `lib/secrets.ts` warns about likely keys before Share.
 
 ## Path resolution (`_core/paths.py` = `_core/preview/lib.js`, cases in `tests/path_rules.json`)

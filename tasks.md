@@ -69,18 +69,18 @@ Owner invites other accounts to publish to and pull from a site. Latest publish 
 - Collaborators can: pull any version, publish, make live, change the start page. Owner only: rename,
   delete versions, unpublish, rotate the edit token, manage members. Max 10 per site. Storage counts against the
   owner's quota; daily upload limit counts against the publisher; bans apply to the owner and members.
-- [ ] 0. Alembic migrations set up first (new tables/columns)
-- [ ] 1. `site_members` (site, email, user sub once accepted, invited_by, created_at); `versions.published_by`.
+- [x] 0. Alembic migrations set up first (new tables/columns)
+- [x] 1. `site_members` (site, email, user sub once accepted, invited_by, created_at); `versions.published_by`.
   Invite by Google email: pending until that email signs in. Routes: list/add/remove members (owner only);
   a member can leave
-- [ ] 2. Access: one `can_edit(user, site)` check (owner or member) used by publish, live, entry, version_files,
+- [x] 2. Access: one `can_edit(user, site)` check (owner or member) used by publish, live, entry, version_files,
   site_blob, `_can_share`; owner-only routes unchanged. `/api/me/sites` includes shared sites with `role`
 - [ ] 3. CLI/MCP: `spinsite pull <site> [dir] [--version n]` + MCP `pull` tool; writes `.spinsite.json`
   (site id, pulled version) that `deploy` reads by default. Never writes hidden files, absolute paths or
   `..` paths. Deploy warns if live is newer than the pulled version (`--force` to skip)
 - [ ] 4. /app: "Shared with you" list with Open here; members panel (owner); version history shows who
   published; same stale-version warning before Publish
-- [ ] 5. Tests (`tests/test_members.py`, CLI/MCP pull), /docs section; update requirements.md + architecture.md
+- [ ] 5. Tests (CLI/MCP pull; server: `tests/test_members.py` done), /docs section; update requirements.md + architecture.md
 
 ## Next
 - [ ] Deploy the content origin: DNS + second Vercel project (docs/deploying.md), then check a live share link
@@ -89,7 +89,6 @@ Owner invites other accounts to publish to and pull from a site. Latest publish 
 - [ ] Delete the old public store `site-runner-blob` in the dashboard (CLI needs an interactive confirm)
 - [ ] Disconnect Development from site-runner-db and site-runner-private (local dev uses SQLite + .data)
 - [ ] Optional: a Neon `dev` branch for testing against real Postgres
-- [ ] Add Alembic migrations before the first schema change
 - [ ] Optional expiry for old shares
 - [ ] Publish the CLI (PyPI or `uvx --from git+...`); `spinsite login` device flow instead of pasting a token
 - [ ] Upload only changed files (digests are content-addressed) to ease the 4MB limit
