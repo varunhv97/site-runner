@@ -12,6 +12,8 @@ export type DialogOptions = {
   items?: string[];
   confirmLabel: string;
   danger?: boolean;
+  /** A second way to confirm (e.g. "Publish anyway" next to "Pull latest"): resolves with its value. */
+  alt?: { label: string; value: string; danger?: boolean };
   /** Ask for text: the dialog resolves with what was typed. */
   input?: {
     label: string;
@@ -146,6 +148,11 @@ function AppDialog({ options, onDone }: { options: DialogOptions; onDone: (value
           <button type="button" onClick={() => onDone(null)}>
             Cancel
           </button>
+          {options.alt && (
+            <button type="button" className={options.alt.danger ? "danger" : undefined} onClick={() => onDone(options.alt!.value)}>
+              {options.alt.label}
+            </button>
+          )}
           <button type="submit" className={options.danger ? "danger-solid" : "primary"} disabled={blocked} autoFocus={!options.input}>
             {options.confirmLabel}
           </button>

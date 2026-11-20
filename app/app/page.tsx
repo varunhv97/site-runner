@@ -16,6 +16,8 @@ import { executableMessage, findExecutable } from "@/lib/executables";
 import { describe as describeSecret, scanFiles } from "@/lib/secrets";
 import { useDialog } from "./AppDialog";
 import ApiTokens from "./ApiTokens";
+import Members from "./Members";
+import { siteRole, staleLive, staleMessage } from "@/lib/collab";
 import Preview from "./Preview";
 import { cleanUpOldPreview, contentConfig, type ContentConfig } from "@/lib/preview";
 import {
@@ -23,6 +25,9 @@ import {
   downloadLiveVersion,
   fetchAccountSites,
   fetchMe,
+  fetchPublicSite,
+  leaveSite,
+  pullVersion,
   fetchUsage,
   pinnedUrl,
   checkSlug,
@@ -166,18 +171,67 @@ export default function Home() {
     setAccountSites(await fetchAccountSites());
   };
 
-  // Shared from this account but not in this browser (another browser or device, cleared data, the old domain).
+  // Account sites not in this browser (another browser or device, cleared data, the old domain): own ones, and
+  // ones other accounts shared with this one.
   const notHere = accountSites.filter((a) => a.live !== null && !sites.some((s) => s.remote?.siteId === a.id));
-  const openHere = (a: (typeof accountSites)[number]) =>
+  const ownNotHere = notHere.filter((a) => a.role === "owner");
+  const sharedWithYou = notHere.filter((a) => a.role === "member");
+  const openHere = (a: AccountSite) =>
     run(`Opening ${a.name}…`, async () => {
       const { files, entry, n } = await downloadLiveVersion(a);
       const s = await addVersion(files, null, a.name, `Shared version ${n}`, entry);
-      // linked to the shared site, so the next publish updates its links (as the signed-in owner; no token here)
-      s.remote = { siteId: a.id, slug: a.slug, token: "", url: a.url, live: a.live, pushed: { 1: n } };
+      // linked to the shared site, so the next publish updates its links (signed in as its owner or a member; no token)
+      s.remote = {
+        siteId: a.id,
+        slug: a.slug,
+        url: a.url,
+        live: a.live,
+        pushed: { 1: n },
+        role: a.role,
+        ownerEmail: a.owner_email,
+      };
       await saveSite(s);
       setPreviewN(1);
       await refresh(s.id);
     });
+
+  // The site's entry in the account's listing (role, owner, who published each version), when signed in.
+  const account = site?.remote ? accountSites.find((a) => a.id === site.remote!.siteId) : undefined;
+  const role = site?.remote ? siteRole(site.remote.siteId, site.remote.role, accountSites) : "owner";
+  const isMember = role === "member";
+  const ownerEmail = account?.owner_email ?? site?.remote?.ownerEmail ?? null;
+  const publisher = (remoteN: number) => account?.versions.find((v) => v.n === remoteN)?.published_by_email ?? null;
+  // From the listing loaded with the page: someone published a newer live version than this browser has.
+  const behind = site?.remote && account ? staleLive(site.remote.pushed, account.live, account.versions) : null;
+
+  const pullLatest = (s: LocalSite, n: number) =>
+    run(`Pulling version ${n}…`, async () => {
+      const updated = await pullVersion(s, n, n);
+      await saveSite(updated);
+      setPreviewN(updated.versions.length);
+      await refresh(updated.id);
+    });
+
+  // Before publishing over a shared site: is its live version newer than what this browser last pulled or
+  // published? Then ask: pull it, publish anyway, or cancel. true = go ahead and publish.
+  const checkStale = async (s: LocalSite): Promise<boolean> => {
+    if (!s.remote) return true;
+    const fresh = me.user ? await fetchAccountSites() : [];
+    if (me.user) setAccountSites(fresh);
+    const info = fresh.find((a) => a.id === s.remote!.siteId) ?? (await fetchPublicSite(s.remote.siteId));
+    if (!info) return true; // gone or unreachable: publishing explains
+    const stale = staleLive(s.remote.pushed, info.live, info.versions);
+    if (!stale) return true;
+    const answer = await ask({
+      title: `Version ${stale.live} is live`,
+      message: staleMessage(stale),
+      confirmLabel: "Pull latest",
+      alt: { label: "Publish anyway", value: "publish", danger: true },
+    });
+    if (answer === "publish") return true;
+    if (answer === "") await pullLatest(s, stale.live);
+    return false;
+  };
 
   // Executables can be previewed here but never shared: say so as soon as they're dropped.
   const warnExecutables = (files: FileMap) => {
@@ -337,20 +391,45 @@ export default function Home() {
                   <strong>{s.name}</strong>
                   <span className="muted">
                     {s.versions.length} version{s.versions.length === 1 ? "" : "s"}
-                    {s.remote ? " · shared" : ""}
+                    {s.remote
+                      ? siteRole(s.remote.siteId, s.remote.role, accountSites) === "member"
+                        ? " · shared with you"
+                        : " · shared"
+                      : ""}
                   </span>
                 </button>
               </li>
             ))}
           </ul>
-          {me.user && notHere.length > 0 && (
+          {me.user && ownNotHere.length > 0 && (
             <div className="account-sites">
               <p className="muted">Shared from your account, not in this browser</p>
               <ul className="sites">
-                {notHere.map((a) => (
+                {ownNotHere.map((a) => (
                   <li key={a.id} className="account-site">
                     <span>
                       <strong>{a.name}</strong>
+                      <a className="small-link" href={a.url} target="_blank" rel="noreferrer">
+                        /s/{a.slug ?? a.id}/
+                      </a>
+                    </span>
+                    <button className="small" disabled={!!busy} onClick={() => openHere(a)}>
+                      Open here
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {me.user && sharedWithYou.length > 0 && (
+            <div className="account-sites">
+              <p className="muted">Shared with you</p>
+              <ul className="sites">
+                {sharedWithYou.map((a) => (
+                  <li key={a.id} className="account-site">
+                    <span>
+                      <strong>{a.name}</strong>
+                      <span className="muted owner">by {a.owner_email ?? "another account"}</span>
                       <a className="small-link" href={a.url} target="_blank" rel="noreferrer">
                         /s/{a.slug ?? a.id}/
                       </a>
@@ -396,9 +475,11 @@ export default function Home() {
                   onClick={async () =>
                     (await ask({
                       title: `Delete “${site.name}” from this browser?`,
-                      message: site.remote
-                        ? "All its local versions are removed. The shared link keeps working until you unpublish it."
-                        : "All its versions are removed from this browser. This can't be undone.",
+                      message: isMember
+                        ? "All its local versions are removed. You stay a member of the shared site and can open it here again."
+                        : site.remote
+                          ? "All its local versions are removed. The shared link keeps working until you unpublish it."
+                          : "All its versions are removed from this browser. This can't be undone.",
                       confirmLabel: "Delete",
                       danger: true,
                     })) !== null &&
@@ -417,87 +498,138 @@ export default function Home() {
                 <div className="share">
                   {site.remote.held ? (
                     <p className="held">
-                      Held for a safety review: {site.remote.held.map((r) => r.charAt(0).toLowerCase() + r.slice(1)).join("; ")}. It
-                      stays private until an admin approves it.
+                      Held for a safety review:{" "}
+                      {site.remote.held.map((r) => r.charAt(0).toLowerCase() + r.slice(1)).join("; ")}. It stays private
+                      until an admin approves it.
                     </p>
                   ) : (
                     <>
-                      <span className="share-label">Live link · version {site.remote.live}</span> <CopyLink url={site.remote.url} />
+                      <span className="share-label">Live link · version {site.remote.live}</span>{" "}
+                      <CopyLink url={site.remote.url} />
                     </>
                   )}
-                  <button
-                    className="small"
-                    disabled={!!busy}
-                    onClick={async () => {
-                      const remote = site.remote!;
-                      const slug = await ask({
-                        title: "Change link name",
-                        message:
-                          "The current link keeps working and forwards to the new one. The site moves to the new name's address, so anything visitors saved on it (progress, settings) starts fresh.",
-                        input: {
-                          label: "Link name",
-                          prefix: `${location.host}/s/`,
-                          defaultValue: remote.slug ?? slugify(site.name),
-                          normalize: normalizeSlug,
-                          required: true,
-                          validate: (value) => checkSlug(value, remote.slug),
-                        },
-                        confirmLabel: "Save name",
-                      });
-                      if (!slug || slug === remote.slug) return;
-                      await run("Renaming…", async () => {
-                        await saveSite(await setSlug(site, slug));
-                        await refresh();
-                      });
-                    }}
-                  >
-                    Change link name
-                  </button>
-                  <details>
-                    <summary className="muted">Edit token</summary>
-                    {site.remote.token ? (
-                      <>
-                        <code>{site.remote.token}</code>
-                        <p className="muted">Anyone with this token can publish versions of this site, through the API or MCP.</p>
-                      </>
-                    ) : (
-                      <p className="muted">
-                        This browser doesn&apos;t have this site&apos;s edit token. You can still publish while signed in. Replace it
-                        to get a new one here (the old one stops working).
-                      </p>
-                    )}
+                  {isMember && (
+                    <p className="shared-by muted">
+                      Shared by <strong>{ownerEmail ?? "another account"}</strong>. You can publish, make a version live
+                      and pull versions; the owner manages the link and members.
+                    </p>
+                  )}
+                  {behind && (
+                    <p className="behind">
+                      <span>
+                        {behind.by ?? "Someone"} published v{behind.live}
+                        {behind.known !== null ? `, newer than the v${behind.known} this browser has` : ""}.
+                      </span>
+                      <button className="small" disabled={!!busy} onClick={() => pullLatest(site, behind.live)}>
+                        Pull v{behind.live}
+                      </button>
+                    </p>
+                  )}
+                  {!isMember && (
                     <button
                       className="small"
                       disabled={!!busy}
-                      onClick={() =>
-                        run("Replacing token…", async () => {
-                          await saveSite(await rotateToken(site));
+                      onClick={async () => {
+                        const remote = site.remote!;
+                        const slug = await ask({
+                          title: "Change link name",
+                          message:
+                            "The current link keeps working and forwards to the new one. The site moves to the new name's address, so anything visitors saved on it (progress, settings) starts fresh.",
+                          input: {
+                            label: "Link name",
+                            prefix: `${location.host}/s/`,
+                            defaultValue: remote.slug ?? slugify(site.name),
+                            normalize: normalizeSlug,
+                            required: true,
+                            validate: (value) => checkSlug(value, remote.slug),
+                          },
+                          confirmLabel: "Save name",
+                        });
+                        if (!slug || slug === remote.slug) return;
+                        await run("Renaming…", async () => {
+                          await saveSite(await setSlug(site, slug));
                           await refresh();
+                        });
+                      }}
+                    >
+                      Change link name
+                    </button>
+                  )}
+                  {!isMember && (
+                    <details>
+                      <summary className="muted">Edit token</summary>
+                      {site.remote.token ? (
+                        <>
+                          <code>{site.remote.token}</code>
+                          <p className="muted">
+                            Anyone with this token can publish versions of this site, through the API or MCP.
+                          </p>
+                        </>
+                      ) : (
+                        <p className="muted">
+                          This browser doesn&apos;t have this site&apos;s edit token. You can still publish while signed
+                          in. Replace it to get a new one here (the old one stops working).
+                        </p>
+                      )}
+                      <button
+                        className="small"
+                        disabled={!!busy}
+                        onClick={() =>
+                          run("Replacing token…", async () => {
+                            await saveSite(await rotateToken(site));
+                            await refresh();
+                          })
+                        }
+                      >
+                        Replace token
+                      </button>
+                    </details>
+                  )}
+                  {account?.role === "owner" && <Members key={account.id} siteId={account.id} ask={ask} />}
+                  {isMember ? (
+                    me.user && (
+                      <button
+                        className="small danger unpublish"
+                        disabled={!!busy}
+                        onClick={async () =>
+                          (await ask({
+                            title: `Leave “${site.name}”?`,
+                            message: `You stop being a member of ${ownerEmail ?? "the owner"}'s site and can't publish to it any more. Your local versions stay in this browser, unlinked.`,
+                            confirmLabel: "Leave",
+                            danger: true,
+                          })) !== null &&
+                          run("Leaving…", async () => {
+                            await saveSite(await leaveSite(site, me.user!.email));
+                            await refresh();
+                            await refreshUsage();
+                          })
+                        }
+                      >
+                        Leave
+                      </button>
+                    )
+                  ) : (
+                    <button
+                      className="small danger unpublish"
+                      disabled={!!busy}
+                      onClick={async () =>
+                        (await ask({
+                          title: "Unpublish this site?",
+                          message:
+                            "Its live and pinned links stop working for everyone. Your local versions stay in this browser.",
+                          confirmLabel: "Unpublish",
+                          danger: true,
+                        })) !== null &&
+                        run("Unpublishing…", async () => {
+                          await saveSite(await unpublish(site));
+                          await refresh();
+                          if (me.user) await refreshUsage();
                         })
                       }
                     >
-                      Replace token
+                      Unpublish
                     </button>
-                  </details>
-                  <button
-                    className="small danger unpublish"
-                    disabled={!!busy}
-                    onClick={async () =>
-                      (await ask({
-                        title: "Unpublish this site?",
-                        message: "Its live and pinned links stop working for everyone. Your local versions stay in this browser.",
-                        confirmLabel: "Unpublish",
-                        danger: true,
-                      })) !== null &&
-                      run("Unpublishing…", async () => {
-                        await saveSite(await unpublish(site));
-                        await refresh();
-                        if (me.user) await refreshUsage();
-                      })
-                    }
-                  >
-                    Unpublish
-                  </button>
+                  )}
                 </div>
               )}
 
@@ -508,14 +640,16 @@ export default function Home() {
                   {[...site.versions].reverse().map((v) => {
                     const remoteN = site.remote?.pushed[v.n];
                     const isLive = remoteN !== undefined && site.remote?.live === remoteN;
+                    const by = remoteN !== undefined ? publisher(remoteN) : null;
                     return (
                       <tr key={v.n} className={v.n === shownN ? "shown" : ""}>
                         <td>
                           <strong>v{v.n}</strong>
                         </td>
                         <td className="muted">
-                          {new Date(v.createdAt).toLocaleString()} · {Object.keys(v.manifest).length} file{Object.keys(v.manifest).length === 1 ? "" : "s"} ·{" "}
-                          {formatSize(v.size)}
+                          {new Date(v.createdAt).toLocaleString()} · {Object.keys(v.manifest).length} file
+                          {Object.keys(v.manifest).length === 1 ? "" : "s"} · {formatSize(v.size)}
+                          {by && <> · by {by}</>}
                           {v.note && <div>{v.note}</div>}
                           {htmlFiles(Object.keys(v.manifest)).length > 1 && (
                             <div className="start-page">
@@ -552,11 +686,13 @@ export default function Home() {
                               disabled={!!busy}
                               onClick={async () => {
                                 if (!(await readyToShare(v))) return;
+                                if (!(await checkStale(site))) return;
                                 let slug: string | undefined;
                                 if (!site.remote) {
                                   const picked = await ask({
                                     title: `Share “${site.name}”`,
-                                    message: "Pick a link name, or leave it blank for a random link. Names are unique and can't be reused.",
+                                    message:
+                                      "Pick a link name, or leave it blank for a random link. Names are unique and can't be reused.",
                                     input: {
                                       label: "Link name",
                                       prefix: `${location.host}/s/`,
@@ -589,30 +725,33 @@ export default function Home() {
                                   run("Updating…", async () => {
                                     await saveSite(await setRemoteLive(site, remoteN));
                                     await refresh();
+                                    if (me.user) setAccountSites(await fetchAccountSites());
                                   })
                                 }
                               >
                                 Make live
                               </button>
-                              <button
-                                className="small danger"
-                                disabled={!!busy}
-                                onClick={async () =>
-                                  (await ask({
-                                    title: `Delete the shared copy of v${v.n}?`,
-                                    message: `Its pinned link (${pinnedUrl(site, remoteN)}) stops working for everyone. The live link isn't affected, and v${v.n} stays in this browser.`,
-                                    confirmLabel: "Delete shared copy",
-                                    danger: true,
-                                  })) !== null &&
-                                  run("Deleting shared copy…", async () => {
-                                    await saveSite(await deleteRemoteVersion(site, remoteN));
-                                    await refresh();
-                                    if (me.user) await refreshUsage();
-                                  })
-                                }
-                              >
-                                Delete shared copy
-                              </button>
+                              {!isMember && (
+                                <button
+                                  className="small danger"
+                                  disabled={!!busy}
+                                  onClick={async () =>
+                                    (await ask({
+                                      title: `Delete the shared copy of v${v.n}?`,
+                                      message: `Its pinned link (${pinnedUrl(site, remoteN)}) stops working for everyone. The live link isn't affected, and v${v.n} stays in this browser.`,
+                                      confirmLabel: "Delete shared copy",
+                                      danger: true,
+                                    })) !== null &&
+                                    run("Deleting shared copy…", async () => {
+                                      await saveSite(await deleteRemoteVersion(site, remoteN));
+                                      await refresh();
+                                      if (me.user) await refreshUsage();
+                                    })
+                                  }
+                                >
+                                  Delete shared copy
+                                </button>
+                              )}
                             </>
                           )}
                           {remoteN !== undefined && (

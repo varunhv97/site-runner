@@ -2,13 +2,17 @@
 import { zipSync } from "fflate";
 import { executableMessage, findExecutable } from "./executables";
 import type { FileMap } from "./ingest";
-import { readVersionFiles, type LocalSite, type LocalVersion } from "./localStore";
+import { addVersion, readVersionFiles, type LocalSite, type LocalVersion, type RemoteLink } from "./localStore";
 
 const MAX_ZIP = 4 * 1024 * 1024;
 
 type RemoteSite = { id: string; slug: string | null; live: number | null; versions: { n: number }[] };
 /** Share responses say whether the site is held for a safety review (its links answer 451 until approved). */
 type HoldStatus = { held?: boolean; reasons?: string[] };
+
+/** The edit token when this browser has one; otherwise the signed-in session (owner or member) is what counts. */
+const tokenHeader = (remote: RemoteLink): Record<string, string> =>
+  remote.token ? { Authorization: `Bearer ${remote.token}` } : {};
 
 /** A suggestion for a link name from a site's name: "Trail Map v2!" -> "trail-map-v2". */
 export function slugify(name: string): string {
@@ -88,7 +92,7 @@ export async function shareVersion(original: LocalSite, version: LocalVersion, s
       const r = await call<{ site: RemoteSite } & HoldStatus>(`/api/sites/${site.remote.siteId}/versions`, {
         method: "POST",
         body: form,
-        headers: { Authorization: `Bearer ${site.remote.token}` },
+        headers: tokenHeader(site.remote),
       });
       site.remote.live = r.site.live;
       site.remote.pushed[version.n] = r.site.live!;
@@ -96,6 +100,9 @@ export async function shareVersion(original: LocalSite, version: LocalVersion, s
       return site;
     } catch (e) {
       if (!isGone(e)) throw e;
+      if (site.remote.role === "member") {
+        throw new Error("This shared site no longer exists. Leave it to unlink this copy, then share it as your own.");
+      }
       delete site.remote; // the shared copy is gone: share this version as a new site below
     }
   }
@@ -116,7 +123,7 @@ export async function refreshHold(original: LocalSite): Promise<LocalSite> {
   if (!original.remote?.held) return original;
   try {
     const r = await call<HoldStatus>(`/api/sites/${original.remote.siteId}/hold`, {
-      headers: original.remote.token ? { Authorization: `Bearer ${original.remote.token}` } : {},
+      headers: tokenHeader(original.remote),
     });
     if (r.held) return original;
     const site = structuredClone(original);
@@ -132,7 +139,7 @@ export async function setRemoteLive(original: LocalSite, remoteN: number): Promi
   if (!site.remote) return site;
   const r = await callExisting<{ site: RemoteSite }>(`/api/sites/${site.remote.siteId}/live`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${site.remote.token}`, "Content-Type": "application/json" },
+    headers: { ...tokenHeader(site.remote), "Content-Type": "application/json" },
     body: JSON.stringify({ version: remoteN }),
   });
   site.remote.live = r.site.live;
@@ -145,7 +152,7 @@ export async function setSlug(original: LocalSite, slug: string): Promise<LocalS
   if (!site.remote) return site;
   const r = await callExisting<{ site: RemoteSite; url: string }>(`/api/sites/${site.remote.siteId}/slug`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${site.remote.token}`, "Content-Type": "application/json" },
+    headers: { ...tokenHeader(site.remote), "Content-Type": "application/json" },
     body: JSON.stringify({ slug }),
   });
   site.remote.url = r.url;
@@ -160,7 +167,7 @@ export async function unpublish(original: LocalSite): Promise<LocalSite> {
   try {
     await call(`/api/sites/${site.remote.siteId}`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${site.remote.token}` },
+      headers: tokenHeader(site.remote),
     });
   } catch (e) {
     if (!isGone(e)) throw e; // already gone: forgetting the link is all that's left to do
@@ -177,7 +184,7 @@ export async function deleteRemoteVersion(original: LocalSite, remoteN: number):
   try {
     const r = await call<{ site: RemoteSite }>(`/api/sites/${site.remote.siteId}/versions/${remoteN}`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${site.remote.token}` },
+      headers: tokenHeader(site.remote),
     });
     site.remote.live = r.site.live;
   } catch (e) {
@@ -199,7 +206,7 @@ export async function rotateToken(original: LocalSite): Promise<LocalSite> {
   if (!site.remote) return site;
   const r = await callExisting<{ edit_token: string }>(`/api/sites/${site.remote.siteId}/token`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${site.remote.token}` },
+    headers: tokenHeader(site.remote),
   });
   site.remote.token = r.edit_token;
   return site;
@@ -244,13 +251,25 @@ export async function setRemoteEntry(site: LocalSite, remoteN: number, entry: st
   if (!site.remote) return;
   await callExisting(`/api/sites/${site.remote.siteId}/versions/${remoteN}/entry`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${site.remote.token}` },
+    headers: { "Content-Type": "application/json", ...tokenHeader(site.remote) },
     body: JSON.stringify({ entry }),
   });
 }
 
-/** A site the signed-in account shared, as /api/me/sites lists it. */
-export type AccountSite = { id: string; slug: string | null; name: string; live: number | null; url: string };
+/** A shared version as /api/me/sites lists it. published_by_email: null for edit-token or older publishes. */
+export type AccountVersion = { n: number; created_at: number; note: string; entry: string; published_by_email?: string | null };
+
+/** A site the signed-in account owns or is a member of, as /api/me/sites lists it (own sites first). */
+export type AccountSite = {
+  id: string;
+  slug: string | null;
+  name: string;
+  live: number | null;
+  url: string;
+  role: "owner" | "member";
+  owner_email: string | null;
+  versions: AccountVersion[];
+};
 
 export async function fetchAccountSites(): Promise<AccountSite[]> {
   try {
@@ -260,16 +279,31 @@ export async function fetchAccountSites(): Promise<AccountSite[]> {
   }
 }
 
-/** The live version's original files and start page, for its owner to open in this browser. */
-export async function downloadLiveVersion(site: AccountSite): Promise<{ files: FileMap; entry: string; n: number }> {
-  const n = site.live!;
-  const v = await call<{ entry: string; files: Record<string, string> }>(`/api/sites/${site.id}/versions/${n}/files`, {});
+/** A shared site's live version and versions from the public API (no publisher emails), or null if it's gone. */
+export async function fetchPublicSite(siteId: string): Promise<{ live: number | null; versions: AccountVersion[] } | null> {
+  try {
+    return (await call<{ site: { live: number | null; versions: AccountVersion[] } }>(`/api/sites/${siteId}`, {})).site;
+  } catch {
+    return null;
+  }
+}
+
+/** A shared version's original files and start page, for its owner or a member to open in this browser. */
+export async function downloadVersion(
+  siteId: string,
+  n: number,
+  headers: Record<string, string> = {},
+): Promise<{ files: FileMap; entry: string; n: number }> {
+  const v = await callExisting<{ entry: string; files: Record<string, string> }>(
+    `/api/sites/${siteId}/versions/${n}/files`,
+    { headers },
+  );
   const byDigest = new Map<string, Promise<Uint8Array>>(); // a file used twice downloads once
   const get = (digest: string, path: string) => {
     if (!byDigest.has(digest)) {
       byDigest.set(
         digest,
-        fetch(`/api/sites/${site.id}/files/${digest}`).then(async (res) => {
+        fetch(`/api/sites/${siteId}/files/${digest}`, { headers }).then(async (res) => {
           if (!res.ok) throw new Error(`Couldn't download ${path} (${res.status}).`);
           return new Uint8Array(await res.arrayBuffer());
         }),
@@ -283,6 +317,49 @@ export async function downloadLiveVersion(site: AccountSite): Promise<{ files: F
     await Promise.all(entries.slice(i, i + 6).map(async ([path, digest]) => (files[path] = await get(digest, path))));
   }
   return { files, entry: v.entry, n };
+}
+
+export const downloadLiveVersion = (site: AccountSite) => downloadVersion(site.id, site.live!);
+
+/** Download shared version n into a new local version of the linked site (saved). Returns the updated site. */
+export async function pullVersion(original: LocalSite, n: number, live: number | null): Promise<LocalSite> {
+  const remote = original.remote!;
+  const { files, entry } = await downloadVersion(remote.siteId, n, tokenHeader(remote));
+  const site = await addVersion(files, original, original.name, `Pulled shared version ${n}`, entry);
+  site.remote!.pushed[site.versions.at(-1)!.n] = n;
+  site.remote!.live = live;
+  return site;
+}
+
+/** A site's owner and members (owner only). */
+export type Member = { email: string; status: "pending" | "accepted"; created_at: number };
+export type Members = { owner: { email: string | null }; members: Member[]; max_members: number };
+
+export const fetchMembers = (siteId: string) => call<Members>(`/api/sites/${siteId}/members`, {});
+
+export const inviteMember = (siteId: string, email: string) =>
+  call<Members>(`/api/sites/${siteId}/members`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+
+export async function removeMember(siteId: string, email: string): Promise<void> {
+  await call(`/api/sites/${siteId}/members/${encodeURIComponent(email)}`, { method: "DELETE" });
+}
+
+/** A member leaves a shared site: removes itself, and this browser forgets the link. The local versions stay. */
+export async function leaveSite(original: LocalSite, email: string): Promise<LocalSite> {
+  const site = structuredClone(original);
+  if (!site.remote) return site;
+  try {
+    await removeMember(site.remote.siteId, email);
+  } catch (e) {
+    // 404: the site is gone; 403: no longer a member (the owner removed us). Unlinking is all that's left.
+    if (!(e instanceof ApiError && (e.status === 404 || e.status === 403))) throw e;
+  }
+  delete site.remote;
+  return site;
 }
 
 /** Personal API tokens: a CLI or MCP client acts as this account with one. Managed only while signed in here. */

@@ -14,11 +14,13 @@ export type LocalVersion = {
 export type RemoteLink = {
   siteId: string;
   slug?: string | null; // the custom link name, when it has one
-  token: string;
+  token?: string; // the edit token, when this browser shared it; signed-in owners and members publish without one
   url: string;
   live: number | null;
   pushed: Record<number, number>; // local version n -> remote version n
   held?: string[]; // held for a safety review: why (its links answer 451 until an admin approves it)
+  role?: "owner" | "member"; // as /api/me/sites said when it was opened here (that listing wins when loaded)
+  ownerEmail?: string | null; // for a member's copy: whose site it is
 };
 
 export type LocalSite = {
