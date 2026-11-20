@@ -83,6 +83,8 @@ Owner invites other accounts to publish to and pull from a site. Latest publish 
 - [x] 5. Tests (`test_members.py`, `test_pull.py`, `test_mcp.py`, `tests/js/collab.test.mjs`), /docs section, docs
 - [x] Server-side `base_version` check (atomic stale publish); one migrate per process on parallel cold requests
 - [x] `spinsite diff` + MCP `diff` (versions, or a version vs a local folder); `tests/test_diff.py`
+- [x] Security review fixes: invite consent, find_site precedence, MCP untrusted content, lock_timeout
+  (+ admin sees each version's publisher)
 - [ ] Follow-ups: re-pull into a folder doesn't delete files the newer version removed; leaving after the owner
   already removed you is 403 not 404 (UI copes); 409 body could include the live version
 

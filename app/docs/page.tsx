@@ -22,6 +22,7 @@ const COMMANDS: [string, string][] = [
   ["spinsite rm my-site", "Unpublish the whole site. All its links stop working."],
   ["spinsite diff my-site --from 3", "What changed from v3 to live (--to 5), or with --folder ./my-site before a deploy."],
   ["spinsite members · invite · remove-member", "See, add or remove who can publish to your site."],
+  ["spinsite invites · accept · decline", "Invitations to other people's sites; nothing is shared until you accept."],
   ["spinsite usage", "Storage your shared sites use, against your 250MB."],
   ["spinsite whoami · logout", "Which account you're logged in as; forget the saved token."],
 ];
@@ -32,6 +33,7 @@ const TOOLS: [string, string][] = [
   ["pull", "Download a version of a site into a folder to edit"],
   ["diff", "What changed between two versions, or a version and a local folder"],
   ["list_members · invite_member · remove_member", "Manage who can publish to your site"],
+  ["list_invites", "See invitations to other people's sites (you accept them yourself, in the app or CLI)"],
   ["set_live", "Roll back or forward"],
   ["rename_site", "Change a link name"],
   ["delete_version · unpublish_site", "Remove a version or a whole site (Claude asks you first)"],
@@ -180,11 +182,14 @@ spinsite deploy ./dist --site my-site --note "fix the nav"`}
       <section className={styles.section} id="together" aria-labelledby="together-h">
         <h2 id="together-h">Working together</h2>
         <p>
-          Invite up to 10 people by their Google email. Once they sign in, they can pull your site, publish new
-          versions and make one live. Renaming, deleting versions, unpublishing and managing members stay yours.
+          Invite up to 10 people by their Google email. Nothing is shared until they accept (under Invitations in
+          the app, or <code>spinsite accept</code>); then they can pull your site, publish new versions and make one
+          live. Renaming, deleting versions, unpublishing and managing members stay yours.
         </p>
         <CodeBlock
           code={`spinsite invite my-site sam@example.com   # you, the owner
+spinsite invites                           # sam: lists it
+spinsite accept my-site                    # sam: joins (or: spinsite decline my-site)
 spinsite pull my-site                      # sam: downloads the live version into ./my-site
 spinsite deploy my-site                    # sam: publishes it back as the new live version`}
         />
@@ -205,6 +210,15 @@ spinsite deploy my-site                    # sam: publishes it back as the new l
           <li>
             <code>spinsite remove-member my-site sam@example.com</code> removes someone; with your own email it leaves a
             site you were invited to.
+          </li>
+          <li>
+            Name sites shared with you by their id or link name: a display name only ever matches your own sites,
+            and your own site wins if a name matches both.
+          </li>
+          <li>
+            Pulled files were written by whoever published them. <code>pull</code> warns about files that coding
+            agents or build tools load on their own (<code>CLAUDE.md</code>, <code>package.json</code>,{" "}
+            <code>Makefile</code>…): read them before running anything in the folder.
           </li>
         </ul>
       </section>

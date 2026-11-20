@@ -61,7 +61,7 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
 - `client.py` async httpx with an account API token; `bundle.py` zips a folder (skips hidden files and symlinks,
   checks the server's limits first); `config.py` saves url + token in `~/.config/spinsite/config.json` (0600),
   `SPINSITE_TOKEN`/`SPINSITE_URL` override. Commands: login, logout, whoami, usage, sites, versions, deploy, live,
-  rename, rm, pull, diff, members, invite, remove-member; all take `--json`. Uses existing routes only.
+  rename, rm, pull, diff, members, invite, remove-member, invites, accept, decline; all take `--json`. Uses existing routes only.
 - `pull.py`: downloads a version (sha256-checked, 8 at a time) into a folder, skipping hidden/absolute/`..`/escaping
   paths; writes `.spinsite.json` (site, version, entry, server), which `deploy` uses as its target and base.
 - `diff.py`: two versions, or a version and a folder (deploy's file rules); compares digests, downloads only changed
@@ -78,7 +78,8 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
   Publishing is one transaction with the site row locked (`FOR UPDATE`); serving a file is one indexed lookup.
 - **Migrations** (Alembic, `_core/migrations/versions`; write new ones with `alembic revision --autogenerate`): `db.migrate()`
   runs on first use per process, in one transaction holding `pg_advisory_xact_lock` (safe behind PgBouncer), so
-  concurrent cold starts wait and then find nothing to do. A DB without `alembic_version` but with `sites` (made by
+  concurrent cold starts wait and then find nothing to do. Postgres: `SET LOCAL lock_timeout = '5s'` after the advisory
+  lock; a lock timeout rolls back and retries (4 tries, backoff) so an ALTER never queues reads behind a long query. A DB without `alembic_version` but with `sites` (made by
   the old `create_all`) is stamped at `0001` (baseline) first. `tests/test_migrations.py` (set `TEST_POSTGRES_URL` for PG).
 - **Blob** (`_core/storage.py`): only `blobs/<sha256>` file contents. Private store (`BLOB_ACCESS`); the token is
   needed for every read. Files never change, so reads use the CDN cache.
@@ -93,21 +94,31 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
   (older than 1 hour), and drops their `blobs` rows.
 
 ## Collaborators (`_core/members.py`)
-- `site_members` (site, lower-cased email, sub once known, invited_by): owner-only `GET/POST /api/sites/<id>/members`,
-  `DELETE …/members/<email>` (a member may leave). Max 10, 30 invites/hour. Invite = Google email; matches an account
-  whose verified email equals it (sub filled at sign-in or `/api/me/sites`). Session or API token, never edit token.
+- `site_members` (site, lower-cased email, sub, accepted_at, invited_by): owner-only `GET/POST /api/sites/<id>/members`,
+  `DELETE …/members/<email>` (owner: anyone, pending too; a member may leave). Max 10, 30 invites/hour. Session or
+  API token, never edit token.
+- Consent: an invite is pending and grants nothing (no access, not in `/api/me/sites`) until the invitee accepts.
+  Always reported "pending" (no account-existence oracle); no auto-accept. `GET /api/me/invites` →
+  `{invites: [{site_id, site_name, slug, owner_email, created_at}]}`; `POST /api/me/invites/<id>/accept` →
+  `{site}` (fills sub, accepted_at); `DELETE /api/me/invites/<id>` declines. Matched on the email in `users` for the
+  caller's sub (set at each Google sign-in, verified), not the cookie's. 60 answers/hour. Migration 0003 reset older rows.
 - `Sites.can_edit` (owner or member) gates publish, live, entry, version files, site files, hold; everything else
   stays owner/edit-token only (`check_access`). Quota: owner's; daily uploads: publisher's; bans: owner and member.
 - `/api/me/sites`: owned sites then member sites, each with `role`, `owner_email`, versions' `published_by_email`.
 - Stale publishes: clients send `base_version` (the version they pulled/last published); `add_version` refuses 409
   inside the locked transaction if a newer one is live. No base = replace. CLI/MCP `--force`, /app "Publish anyway".
-- /app: `lib/collab.ts` (stale decision, role), `app/app/Members.tsx` (owner panel; Leave for members); a member's
-  local copy has `remote` without a token and publishes with the session.
+- /app: `lib/collab.ts` (stale decision, role), `app/app/Members.tsx` (owner panel; Leave for members), Invitations
+  list (Accept / Decline); a member's local copy has `remote` without a token and publishes with the session.
+- `find_site` (CLI/MCP): own sites by id, link name, then unique display name; member sites only by id or link name;
+  own wins. So an inviter can't name a site like yours to catch `deploy --site <name>`.
+- MCP: tool descriptions mark names, notes, paths, diffs and pulled files as untrusted data; `list_invites` only (no
+  accept tool); `pull` refuses a non-empty folder that isn't a pull of that site even with force. `pull` lists
+  auto-loaded files (CLAUDE.md, AGENTS.md, package.json, Makefile, conftest.py…) in `review_before_running`.
 
 ## Abuse (`_core/abuse.py`, `/report`, `/admin`)
 - `/report` posts `POST /api/reports`: the link (`/s/<ref>` or `<ref>.<UC>`) resolves like `/s/` into `reports`.
 - Rate limit: one-hour window per client IP (X-Real-IP / X-Forwarded-For) in `rate_limits`; pruned by the cron.
-- `/admin` (ADMIN_EMAILS) lists reports; Unpublish = the existing admin takedown, which also actions the site's reports.
+- `/admin` (ADMIN_EMAILS) lists reports (with the live version's `published_by_email`; holds: the held version's); Unpublish = the existing admin takedown, which also actions the site's reports.
 - `bans` (email, sub): `index._can_share` before every share write refuses a banned user (owner or member) or a
   write to a banned owner's site. A ban unpublishes the owner's sites (`deleted_by_admin`).
 

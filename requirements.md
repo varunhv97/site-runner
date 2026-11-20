@@ -17,6 +17,7 @@ Keep **versions** of each site. Optionally **share** a version via a public link
 - `spinsite` CLI (`cli/`): deploy, sites, versions, live, rename, rm, usage. `spinsite mcp` serves them as MCP tools; guide at /docs.
 - Collaborators: the owner invites up to 10 Google accounts by email; members publish, make live, change the start
   page and pull versions. Rename, delete versions, unpublish, edit token and members stay the owner's.
+  An invite grants nothing until the invitee accepts it (app or `spinsite accept`).
 
 ## Key decisions
 - **Local-first.** Nothing leaves the device until you click Share.
