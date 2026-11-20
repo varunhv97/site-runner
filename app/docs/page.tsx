@@ -13,12 +13,14 @@ const FROM_GIT = "git+https://github.com/varunhv97/site-runner#subdirectory=cli"
 const COMMANDS: [string, string][] = [
   ["spinsite deploy ./dist", "Share a folder (or .zip) as a new site. Add --slug my-site for my-site.sites.spinsite.app."],
   ["spinsite deploy ./dist --site my-site", "Publish a new version of one of your sites. It goes live right away."],
-  ["spinsite sites", "Your shared sites, their live version and link."],
+  ["spinsite sites", "Your shared sites and the ones you're a member of, their live version and link."],
+  ["spinsite pull my-site", "Download the live version into ./my-site (or --version 3) to edit and deploy back."],
   ["spinsite versions my-site", "A site's versions. The live one is marked with *."],
   ["spinsite live my-site 3", "Make version 3 live: roll back or forward."],
   ["spinsite rename my-site new-name", "Change the link name. Old links forward to the new one."],
   ["spinsite rm my-site 2", "Delete version 2 (not the live one). Its pinned link stops working."],
   ["spinsite rm my-site", "Unpublish the whole site. All its links stop working."],
+  ["spinsite members · invite · remove-member", "See, add or remove who can publish to your site."],
   ["spinsite usage", "Storage your shared sites use, against your 250MB."],
   ["spinsite whoami · logout", "Which account you're logged in as; forget the saved token."],
 ];
@@ -26,6 +28,8 @@ const COMMANDS: [string, string][] = [
 const TOOLS: [string, string][] = [
   ["deploy", "Publish a folder from your computer as a new site or a new version"],
   ["list_sites · list_versions", "See your sites and their versions"],
+  ["pull", "Download a version of a site into a folder to edit"],
+  ["list_members · invite_member · remove_member", "Manage who can publish to your site"],
   ["set_live", "Roll back or forward"],
   ["rename_site", "Change a link name"],
   ["delete_version · unpublish_site", "Remove a version or a whole site (Claude asks you first)"],
@@ -67,6 +71,9 @@ export default function DocsPage() {
         </li>
         <li>
           <a href="#claude">3. Use it with Claude</a>
+        </li>
+        <li>
+          <a href="#together">Working together</a>
         </li>
         <li>
           <a href="#safety">Keeping it safe</a>
@@ -168,6 +175,38 @@ spinsite deploy ./dist --site my-site --note "fix the nav"`}
         </p>
       </section>
 
+      <section className={styles.section} id="together" aria-labelledby="together-h">
+        <h2 id="together-h">Working together</h2>
+        <p>
+          Invite up to 10 people by their Google email. Once they sign in, they can pull your site, publish new
+          versions and make one live. Renaming, deleting versions, unpublishing and managing members stay yours.
+        </p>
+        <CodeBlock
+          code={`spinsite invite my-site sam@example.com   # you, the owner
+spinsite pull my-site                      # sam: downloads the live version into ./my-site
+spinsite deploy my-site                    # sam: publishes it back as the new live version`}
+        />
+        <p>
+          A pulled folder remembers its site and version in a hidden <code>.spinsite.json</code> (never uploaded), so{" "}
+          <code>deploy</code> needs no <code>--site</code>.
+        </p>
+        <ul>
+          <li>
+            <strong>There is no merging: the last publish wins.</strong> If someone published since your pull,{" "}
+            <code>deploy</code> stops and tells you who. Run <code>spinsite pull</code> to get their version (into a new
+            folder if you have changes to carry over), or <code>--force</code> to replace it anyway.
+          </li>
+          <li>
+            Every version records who published it (<code>spinsite versions my-site</code>), and any of them can be
+            made live again.
+          </li>
+          <li>
+            <code>spinsite remove-member my-site sam@example.com</code> removes someone; with your own email it leaves a
+            site you were invited to.
+          </li>
+        </ul>
+      </section>
+
       <section className={styles.section} id="safety" aria-labelledby="safety-h">
         <h2 id="safety-h">Keeping it safe</h2>
         <ul>
@@ -180,7 +219,8 @@ spinsite deploy ./dist --site my-site --note "fix the nav"`}
           </li>
           <li>
             <strong>Hidden files and symlinks are never uploaded</strong>, so <code>.env</code>, <code>.git</code> and
-            links to files outside the folder stay on your computer.
+            links to files outside the folder stay on your computer. <code>pull</code> never writes hidden files or
+            anything outside the folder.
           </li>
           <li>
             <strong>Deployed sites are public</strong> to anyone with the link, and go through the same safety checks

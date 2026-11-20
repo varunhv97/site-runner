@@ -11,12 +11,17 @@ spinsite sites | versions my-site | usage
 spinsite live my-site 3     # roll back or forward
 spinsite rm my-site 2       # delete a version (or the whole site without a number)
 spinsite rename my-site new-name
+
+# working together (no merging: the last publish wins)
+spinsite invite my-site sam@example.com   # owner; also: members, remove-member
+spinsite pull my-site [dir]               # sam: live version into ./my-site (+ .spinsite.json)
+spinsite deploy my-site                   # publishes to the pulled site; refuses if someone published since
 ```
 
 ## MCP (Claude Code, Claude Desktop, Cursor)
 
-`spinsite mcp` serves the same actions as MCP tools over stdio (deploy, list_sites, list_versions, set_live,
-rename_site, delete_version, unpublish_site, usage, whoami). `deploy` reads the folder from disk.
+`spinsite mcp` serves the same actions as MCP tools over stdio (deploy, pull, list_sites, list_versions, set_live,
+rename_site, delete_version, unpublish_site, list_members, invite_member, remove_member, usage, whoami). `deploy` reads the folder from disk.
 
 ```sh
 claude mcp add --scope user spinsite -- spinsite mcp
