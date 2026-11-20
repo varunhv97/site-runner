@@ -24,6 +24,11 @@ export function staleLive(
   return { live, known, by };
 }
 
+/** The base_version to publish with: the last version this browser knows, unless publishing anyway (none). */
+export function publishBase(pushed: Record<number, number>, anyway: boolean): number | undefined {
+  return anyway ? undefined : (lastKnownRemote(pushed) ?? undefined);
+}
+
 export function staleMessage(s: Stale): string {
   const since = s.known === null ? "" : ` since you last pulled v${s.known}`;
   return `${s.by ?? "Someone"} published v${s.live}${since}. Publishing replaces it as live — nothing is merged.`;

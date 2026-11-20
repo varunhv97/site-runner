@@ -17,7 +17,7 @@ import { describe as describeSecret, scanFiles } from "@/lib/secrets";
 import { useDialog } from "./AppDialog";
 import ApiTokens from "./ApiTokens";
 import Members from "./Members";
-import { siteRole, staleLive, staleMessage } from "@/lib/collab";
+import { publishBase, siteRole, staleLive, staleMessage } from "@/lib/collab";
 import Preview from "./Preview";
 import { cleanUpOldPreview, contentConfig, type ContentConfig } from "@/lib/preview";
 import {
@@ -26,6 +26,7 @@ import {
   fetchAccountSites,
   fetchMe,
   fetchPublicSite,
+  isConflict,
   leaveSite,
   pullVersion,
   fetchUsage,
@@ -213,24 +214,50 @@ export default function Home() {
     });
 
   // Before publishing over a shared site: is its live version newer than what this browser last pulled or
-  // published? Then ask: pull it, publish anyway, or cancel. true = go ahead and publish.
-  const checkStale = async (s: LocalSite): Promise<boolean> => {
-    if (!s.remote) return true;
+  // published? Then ask: pull it, publish anyway, or cancel. "ok": not stale; "anyway": replace it; "stop".
+  const checkStale = async (s: LocalSite): Promise<"ok" | "anyway" | "stop"> => {
+    if (!s.remote) return "ok";
     const fresh = me.user ? await fetchAccountSites() : [];
     if (me.user) setAccountSites(fresh);
     const info = fresh.find((a) => a.id === s.remote!.siteId) ?? (await fetchPublicSite(s.remote.siteId));
-    if (!info) return true; // gone or unreachable: publishing explains
+    if (!info) return "ok"; // gone or unreachable: publishing explains
     const stale = staleLive(s.remote.pushed, info.live, info.versions);
-    if (!stale) return true;
+    if (!stale) return "ok";
     const answer = await ask({
       title: `Version ${stale.live} is live`,
       message: staleMessage(stale),
       confirmLabel: "Pull latest",
       alt: { label: "Publish anyway", value: "publish", danger: true },
     });
-    if (answer === "publish") return true;
+    if (answer === "publish") return "anyway";
     if (answer === "") await pullLatest(s, stale.live);
-    return false;
+    return "stop";
+  };
+
+  // Share a version, or publish it to the linked site. The publish carries base_version (what this browser last
+  // pulled or published), so the server refuses it (409) if someone else's version went live in the meantime,
+  // even between the check above and the upload; then the same dialog is shown.
+  const publishVersion = async (s: LocalSite, v: LocalVersion, slug?: string) => {
+    let decision = await checkStale(s);
+    if (decision === "stop") return;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let conflict: string | null = null;
+      await run("Uploading…", async () => {
+        try {
+          const base = s.remote ? publishBase(s.remote.pushed, decision === "anyway") : undefined;
+          await saveSite(await shareVersion(s, v, slug, base));
+        } catch (e) {
+          if (!isConflict(e)) throw e;
+          conflict = e instanceof Error ? e.message : String(e);
+        }
+        await refresh();
+        if (me.user) await refreshUsage();
+      });
+      if (conflict === null) return;
+      decision = await checkStale(s);
+      if (decision === "stop") return;
+      if (decision === "ok") return setError(conflict); // not stale after all (e.g. a race on the number): say why
+    }
   };
 
   // Executables can be previewed here but never shared: say so as soon as they're dropped.
@@ -504,7 +531,7 @@ export default function Home() {
                     </p>
                   ) : (
                     <>
-                      <span className="share-label">Live link · version {site.remote.live}</span>{" "}
+                      <span className="share-label">Live link · version {account?.live ?? site.remote.live}</span>{" "}
                       <CopyLink url={site.remote.url} />
                     </>
                   )}
@@ -639,7 +666,7 @@ export default function Home() {
                 <tbody>
                   {[...site.versions].reverse().map((v) => {
                     const remoteN = site.remote?.pushed[v.n];
-                    const isLive = remoteN !== undefined && site.remote?.live === remoteN;
+                    const isLive = remoteN !== undefined && (account?.live ?? site.remote?.live) === remoteN;
                     const by = remoteN !== undefined ? publisher(remoteN) : null;
                     return (
                       <tr key={v.n} className={v.n === shownN ? "shown" : ""}>
@@ -686,7 +713,6 @@ export default function Home() {
                               disabled={!!busy}
                               onClick={async () => {
                                 if (!(await readyToShare(v))) return;
-                                if (!(await checkStale(site))) return;
                                 let slug: string | undefined;
                                 if (!site.remote) {
                                   const picked = await ask({
@@ -705,11 +731,7 @@ export default function Home() {
                                   if (picked === null) return;
                                   slug = picked || undefined;
                                 }
-                                await run("Uploading…", async () => {
-                                  await saveSite(await shareVersion(site, v, slug));
-                                  await refresh();
-                                  if (me.user) await refreshUsage();
-                                });
+                                await publishVersion(site, v, slug);
                               }}
                             >
                               {site.remote ? "Publish" : "Share"}

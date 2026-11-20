@@ -1,7 +1,7 @@
 // Runs with `node --test tests/js/` (Node 22.18+ strips the types from lib/collab.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { lastKnownRemote, siteRole, staleLive, staleMessage } from "../../lib/collab.ts";
+import { lastKnownRemote, publishBase, siteRole, staleLive, staleMessage } from "../../lib/collab.ts";
 
 test("last known remote version is the highest pulled or published", () => {
   assert.equal(lastKnownRemote({}), null);
@@ -38,4 +38,10 @@ test("role: account listing, then stored, then owner", () => {
   assert.equal(siteRole("b", "member", account), "owner");
   assert.equal(siteRole("c", "member", account), "member");
   assert.equal(siteRole("c", undefined, account), "owner");
+});
+
+test("publish base: last known version, none when publishing anyway or nothing known", () => {
+  assert.equal(publishBase({ 1: 3, 2: 5 }, false), 5);
+  assert.equal(publishBase({ 1: 3 }, true), undefined);
+  assert.equal(publishBase({}, false), undefined);
 });

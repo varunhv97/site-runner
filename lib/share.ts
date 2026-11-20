@@ -73,8 +73,18 @@ async function callExisting<T>(url: string, init: RequestInit): Promise<T> {
   }
 }
 
-/** Upload a local version. Creates the remote site on first share. Returns the updated site. */
-export async function shareVersion(original: LocalSite, version: LocalVersion, slug?: string): Promise<LocalSite> {
+/** A publish the server refused with 409: a newer version went live after `base` (or two publishes raced). */
+export const isConflict = (e: unknown) => e instanceof ApiError && e.status === 409;
+
+/** Upload a local version. Creates the remote site on first share. Returns the updated site.
+ * base: the shared version this browser last pulled or published; the server refuses (409, see isConflict) when a
+ * newer one went live since. Leave it out to replace whatever is live ("Publish anyway"). */
+export async function shareVersion(
+  original: LocalSite,
+  version: LocalVersion,
+  slug?: string,
+  base?: number,
+): Promise<LocalSite> {
   const site = structuredClone(original);
   const files = await readVersionFiles(version);
   const executable = findExecutable(files);
@@ -88,6 +98,7 @@ export async function shareVersion(original: LocalSite, version: LocalVersion, s
   form.append("entry", version.entry); // the start page picked here, so shared links open the same page
 
   if (site.remote) {
+    if (base) form.append("base_version", String(base));
     try {
       const r = await call<{ site: RemoteSite } & HoldStatus>(`/api/sites/${site.remote.siteId}/versions`, {
         method: "POST",
@@ -257,7 +268,13 @@ export async function setRemoteEntry(site: LocalSite, remoteN: number, entry: st
 }
 
 /** A shared version as /api/me/sites lists it. published_by_email: null for edit-token or older publishes. */
-export type AccountVersion = { n: number; created_at: number; note: string; entry: string; published_by_email?: string | null };
+export type AccountVersion = {
+  n: number;
+  created_at: number;
+  note: string;
+  entry: string;
+  published_by_email?: string | null;
+};
 
 /** A site the signed-in account owns or is a member of, as /api/me/sites lists it (own sites first). */
 export type AccountSite = {
@@ -280,7 +297,9 @@ export async function fetchAccountSites(): Promise<AccountSite[]> {
 }
 
 /** A shared site's live version and versions from the public API (no publisher emails), or null if it's gone. */
-export async function fetchPublicSite(siteId: string): Promise<{ live: number | null; versions: AccountVersion[] } | null> {
+export async function fetchPublicSite(
+  siteId: string,
+): Promise<{ live: number | null; versions: AccountVersion[] } | null> {
   try {
     return (await call<{ site: { live: number | null; versions: AccountVersion[] } }>(`/api/sites/${siteId}`, {})).site;
   } catch {
