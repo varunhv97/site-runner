@@ -350,7 +350,32 @@ export async function pullVersion(original: LocalSite, n: number, live: number |
   return site;
 }
 
-/** A site's owner and members (owner only). */
+/** An invitation to collaborate on someone else's site. It grants nothing until accepted (by this account only). */
+export type Invite = {
+  site_id: string;
+  site_name: string;
+  slug: string | null;
+  owner_email: string | null;
+  created_at: number;
+};
+
+export async function fetchInvites(): Promise<Invite[]> {
+  try {
+    return (await call<{ invites: Invite[] }>("/api/me/invites", {})).invites;
+  } catch {
+    return [];
+  }
+}
+
+/** Accept: the site then appears among the account's sites as a member. */
+export const acceptInvite = (siteId: string) =>
+  call<{ site: AccountSite }>(`/api/me/invites/${encodeURIComponent(siteId)}/accept`, { method: "POST" });
+
+export async function declineInvite(siteId: string): Promise<void> {
+  await call(`/api/me/invites/${encodeURIComponent(siteId)}`, { method: "DELETE" });
+}
+
+/** A site's owner and members (owner only). status "pending": invited, hasn't accepted yet. */
 export type Member = { email: string; status: "pending" | "accepted"; created_at: number };
 export type Members = { owner: { email: string | null }; members: Member[]; max_members: number };
 

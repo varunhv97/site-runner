@@ -48,7 +48,7 @@ export default function Members({
   const remove = async (who: string) => {
     const ok = await ask({
       title: `Remove ${who}?`,
-      message: "They can't publish to this site or pull its versions any more. Versions they published stay.",
+      message: "They can't publish to this site or pull its versions any more (or accept the invitation). Versions they published stay.",
       confirmLabel: "Remove",
       danger: true,
     });
@@ -72,7 +72,10 @@ export default function Members({
       {loadError && <p className="form-error">{loadError}</p>}
       {list && (
         <>
-          <p className="muted">Members can publish versions, make one live, change the start page and pull versions.</p>
+          <p className="muted">
+            Members can publish versions, make one live, change the start page and pull versions. Someone you invite
+            gets access only after they accept.
+          </p>
           <ul>
             <li>
               <span className="member-email">{list.owner.email ?? "You"}</span>
@@ -82,7 +85,7 @@ export default function Members({
               <li key={m.email}>
                 <span className="member-email">{m.email}</span>
                 <span className={`member-status ${m.status}`}>
-                  {m.status === "pending" ? "Invited · not signed in yet" : "Member"}
+                  {m.status === "pending" ? "Invited, hasn't accepted yet" : "Member"}
                 </span>
                 <button className="small danger" disabled={working} onClick={() => remove(m.email)}>
                   Remove

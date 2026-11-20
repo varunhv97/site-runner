@@ -239,3 +239,4 @@ main.narrow { max-width: 680px; }
 .member-invite input[aria-invalid="true"] { border-color: var(--danger); }
 .members li button, .members .member-invite button { margin-top: 0; }
 .account-site .owner { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-site > .invite-actions { display: flex; gap: 6px; flex: none; }

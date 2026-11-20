@@ -24,6 +24,10 @@ import {
   deleteRemoteVersion,
   downloadLiveVersion,
   fetchAccountSites,
+  fetchInvites,
+  acceptInvite,
+  declineInvite,
+  type Invite,
   fetchMe,
   fetchPublicSite,
   isConflict,
@@ -131,6 +135,7 @@ export default function Home() {
   const [me, setMe] = useState<Me>({ enabled: false, user: null });
   const [usage, setUsage] = useState<Usage | null>(null);
   const [accountSites, setAccountSites] = useState<AccountSite[]>([]);
+  const [invites, setInvites] = useState<Invite[]>([]);
   const { ask, dialog } = useDialog();
 
   const site = sites.find((s) => s.id === selectedId) ?? null;
@@ -150,6 +155,7 @@ export default function Home() {
       setMe(m);
       if (m.user) fetchUsage().then(setUsage);
       if (m.user) fetchAccountSites().then(setAccountSites);
+      if (m.user) fetchInvites().then(setInvites);
       if (new URLSearchParams(location.search).get("signin") === "failed") {
         setError("Google sign-in didn't finish. Try again, and pick an account with a verified email.");
       }
@@ -194,6 +200,16 @@ export default function Home() {
       await saveSite(s);
       setPreviewN(1);
       await refresh(s.id);
+    });
+
+  // Someone invited this account to their site: nothing is shared until it accepts here (or with the CLI).
+  const answerInvite = (i: Invite, yes: boolean) =>
+    run(yes ? `Joining ${i.site_name}…` : "Declining…", async () => {
+      if (yes) await acceptInvite(i.site_id);
+      else await declineInvite(i.site_id);
+      setInvites(await fetchInvites());
+      setAccountSites(await fetchAccountSites());
+      if (yes) setNotice(`You're a member of ${i.site_name}. It's under "Shared with you".`);
     });
 
   // The site's entry in the account's listing (role, owner, who published each version), when signed in.
@@ -443,6 +459,29 @@ export default function Home() {
                     <button className="small" disabled={!!busy} onClick={() => openHere(a)}>
                       Open here
                     </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {me.user && invites.length > 0 && (
+            <div className="account-sites">
+              <p className="muted">Invitations</p>
+              <ul className="sites">
+                {invites.map((i) => (
+                  <li key={i.site_id} className="account-site">
+                    <span>
+                      <strong>{i.site_name}</strong>
+                      <span className="muted owner">from {i.owner_email ?? "another account"}</span>
+                    </span>
+                    <span className="invite-actions">
+                      <button className="small primary" disabled={!!busy} onClick={() => answerInvite(i, true)}>
+                        Accept
+                      </button>
+                      <button className="small" disabled={!!busy} onClick={() => answerInvite(i, false)}>
+                        Decline
+                      </button>
+                    </span>
                   </li>
                 ))}
               </ul>
