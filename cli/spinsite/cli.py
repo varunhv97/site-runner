@@ -213,6 +213,13 @@ def pull(
     if body["skipped"]:
         text += "\nSkipped (hidden or unsafe paths): " + ", ".join(body["skipped"])
         typer.secho(f"warning: skipped {len(body['skipped'])} hidden or unsafe paths", err=True, fg="yellow")
+    if body["review_before_running"]:
+        typer.secho(
+            "warning: read these before running build tools or a coding agent in this folder (they load or run "
+            "them, and whoever published the site wrote them): " + ", ".join(body["review_before_running"]),
+            err=True,
+            fg="yellow",
+        )
     text += f"\nEdit, then: spinsite deploy {body['dir']}"
     out(as_json, body, text)
 
@@ -320,13 +327,16 @@ def rm(
 
 def _members_text(body: dict) -> str:
     lines = [f"owner    {body['owner'].get('email') or '-'}"]
-    lines += [f"{m['status']:<8} {m['email']}" for m in body["members"]]
+    lines += [
+        f"{m['status']:<8} {m['email']}" + ("  (invited, hasn't accepted yet)" if m["status"] == "pending" else "")
+        for m in body["members"]
+    ]
     return "\n".join(lines) + f"\n{len(body['members'])} of {body['max_members']} members"
 
 
 @app.command()
 def members(site: Annotated[str, typer.Argument(help="Site id, link name or name.")], as_json: JsonOpt = False):
-    """Who can publish to and pull from one of your sites (owner only). Pending = hasn't signed in yet."""
+    """Who can publish to and pull from one of your sites (owner only). Pending = invited, hasn't accepted yet."""
 
     async def go(c: Client):
         return await c.members((await c.find_site(site))["id"])
@@ -350,7 +360,8 @@ def invite(
     out(
         as_json,
         body,
-        f"Invited {email.strip().lower()}. They can now `spinsite pull` and deploy it.\n" + _members_text(body),
+        f"Invited {email.strip().lower()}. Once they accept (`spinsite accept` or in the app), they can pull and "
+        "deploy it.\n" + _members_text(body),
     )
 
 
@@ -371,6 +382,57 @@ def remove_member(
     out(
         as_json, {"ok": True, "site_id": s["id"], "removed": email.strip().lower()}, f"Removed {email} from {s['name']}"
     )
+
+
+# ---- invitations to other people's sites ----
+
+
+@app.command()
+def invites(as_json: JsonOpt = False):
+    """Invitations to publish to other people's sites. Nothing is shared with you until you accept one."""
+    found = run(lambda c: c.invites())
+    lines = [
+        f"{i.get('slug') or i['site_id']:<24} {i['site_name'][:30]:<30} from {i.get('owner_email') or '?'}"
+        for i in found
+    ]
+    text = "\n".join(lines) + "\nAccept with `spinsite accept <site>`, or `spinsite decline <site>`."
+    out(as_json, found, text if found else "No invitations.")
+
+
+@app.command()
+def accept(
+    site: Annotated[str, typer.Argument(help="The invitation's site id or link name (see `spinsite invites`).")],
+    as_json: JsonOpt = False,
+):
+    """Accept an invitation: you can then pull, publish and make versions live on that site."""
+
+    async def go(c: Client):
+        return await c.accept_invite((await c.find_invite(site))["site_id"])
+
+    s = run(go)
+    ref = s.get("slug") or s["id"]
+    out(
+        as_json,
+        s,
+        f"You're now a member of {s['name']} (owner {s.get('owner_email') or '?'}). "
+        f"Get it with: spinsite pull {ref}",
+    )
+
+
+@app.command()
+def decline(
+    site: Annotated[str, typer.Argument(help="The invitation's site id or link name (see `spinsite invites`).")],
+    as_json: JsonOpt = False,
+):
+    """Decline an invitation."""
+
+    async def go(c: Client):
+        i = await c.find_invite(site)
+        await c.decline_invite(i["site_id"])
+        return i
+
+    i = run(go)
+    out(as_json, {"ok": True, "site_id": i["site_id"]}, f"Declined the invitation to {i['site_name']}")
 
 
 @app.command()

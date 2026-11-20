@@ -142,8 +142,16 @@ def test_member_pulls_and_deploys_stale_refused_then_forced(two, tmp_path):
     assert members["owner"]["email"] == "alice@example.com" and members["members"][0]["email"] == "bob@example.com"
     assert "already a member" in invoke("invite", "team", "bob@example.com").output
 
-    # both pull v1
+    # nothing is shared until Bob accepts
     as_bob()
+    assert "no site" in invoke("pull", "team").output
+    r = ok(invoke("invites"))
+    assert "team" in r.output and "from alice@example.com" in r.output
+    assert "no invitation" in invoke("accept", "nope").output
+    assert "member of" in ok(invoke("accept", "team")).output
+    assert ok(invoke("invites")).output.strip() == "No invitations."
+
+    # both pull v1
     assert "member (owner alice@example.com)" in ok(invoke("sites")).output
     assert json.loads(ok(invoke("sites", "--json")).output)[0]["role"] == "member"
     ok(invoke("pull", "team", "bobs"))
@@ -230,13 +238,73 @@ def test_owner_removes_member(two, tmp_path):
     shared_site(invoke, tmp_path)
     ok(invoke("invite", "team", "bob@example.com"))
     ok(invoke("invite", "team", "carol@example.com"))
-    assert "pending  carol@example.com" in ok(invoke("members", "team")).output
+    out = ok(invoke("members", "team")).output
+    assert "pending  carol@example.com  (invited, hasn't accepted yet)" in out
     r = json.loads(ok(invoke("remove-member", "team", "Carol@example.com", "--json")).output)
     assert r == {"ok": True, "site_id": r["site_id"], "removed": "carol@example.com"}
     assert "no such member" in invoke("remove-member", "team", "carol@example.com").output
     as_bob()
+    ok(invoke("accept", "team"))
     ok(invoke("pull", "team", "b"))
     as_alice()
     ok(invoke("remove-member", "team", "bob@example.com"))
     as_bob()
     assert "no site" in invoke("pull", "team", "c").output
+
+
+def test_decline_an_invitation(two, tmp_path):
+    invoke, as_alice, as_bob = two
+    as_alice()
+    sid = shared_site(invoke, tmp_path)
+    ok(invoke("invite", "team", "bob@example.com"))
+    as_bob()
+    [inv] = json.loads(ok(invoke("invites", "--json")).output)
+    assert (inv["site_id"], inv["slug"], inv["owner_email"]) == (sid, "team", "alice@example.com")
+    assert json.loads(ok(invoke("decline", sid, "--json")).output) == {"ok": True, "site_id": sid}
+    assert json.loads(ok(invoke("invites", "--json")).output) == []
+    assert "no site" in invoke("pull", "team").output
+
+
+def test_owned_site_wins_over_a_member_site_with_the_same_name(two, tmp_path):
+    """Bob invites Alice to a site whose link name is the display name of one of Alice's sites, hoping her
+    `deploy --site portfolio` lands on his site."""
+    invoke, as_alice, as_bob = two
+    as_alice()
+    d = site_dir(tmp_path, {"index.html": "alice"}, "portfolio")
+    mine = json.loads(ok(invoke("deploy", str(d), "--json")).output)["site"]
+    assert mine["name"] == "portfolio" and mine["slug"] is None
+    as_bob()
+    trap = shared_site(invoke, tmp_path, slug="portfolio")
+    named = json.loads(
+        ok(
+            invoke("deploy", str(site_dir(tmp_path, {"index.html": "b"}, "bob-src")), "--name", "Notes", "--json")
+        ).output
+    )["site"]
+    ok(invoke("invite", "portfolio", "alice@example.com"))
+    ok(invoke("invite", named["id"], "alice@example.com"))
+    as_alice()
+    ok(invoke("accept", "portfolio"))
+    ok(invoke("accept", named["id"]))
+
+    body = json.loads(ok(invoke("deploy", str(d), "--site", "portfolio", "--json")).output)
+    assert body["site"]["id"] == mine["id"]  # her own site, by display name, beats his link name
+    assert json.loads(ok(invoke("versions", trap, "--json")).output)["id"] == trap  # his by exact id still works
+    r = invoke("versions", "Notes")  # a member site is never matched by display name
+    assert r.exit_code == 1 and "shared with you" in r.output
+    assert json.loads(ok(invoke("versions", named["id"], "--json")).output)["id"] == named["id"]
+
+
+def test_pull_points_out_files_agents_and_tools_load(two, tmp_path):
+    invoke, as_alice, _ = two
+    as_alice()
+    files = {
+        "index.html": "x",
+        "CLAUDE.md": "do things",
+        "package.json": "{}",
+        "sub/AGENTS.md": "a",
+        "sub/Makefile": "m",
+    }
+    shared_site(invoke, tmp_path, files=files)
+    r = ok(invoke("pull", "team", "--json"))
+    assert json.loads(r.stdout)["review_before_running"] == ["CLAUDE.md", "package.json", "sub/AGENTS.md"]
+    assert "CLAUDE.md, package.json, sub/AGENTS.md" in r.stderr

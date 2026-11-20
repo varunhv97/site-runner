@@ -56,6 +56,7 @@ def test_only_the_owner_manages_members_and_a_member_can_leave(client, monkeypat
     assert invite(client, sid, "dave@example.com").status_code == 401
 
     sign_in(client, monkeypatch, BOB)  # a member, but not the owner
+    assert accept(client, sid).status_code == 200
     assert client.get(f"/api/sites/{sid}/members").status_code == 403
     assert invite(client, sid, "dave@example.com").status_code == 403
     assert client.delete(f"/api/sites/{sid}/members/carol@example.com").status_code == 403
@@ -65,17 +66,122 @@ def test_only_the_owner_manages_members_and_a_member_can_leave(client, monkeypat
     assert [m["email"] for m in client.get(f"/api/sites/{sid}/members").json()["members"]] == ["carol@example.com"]
 
 
-def test_pending_invite_is_accepted_on_sign_in(client, monkeypatch):
+def accept(client, sid, **kw):
+    return client.post(f"/api/me/invites/{sid}/accept", **kw)
+
+
+def test_invite_stays_pending_until_accepted_and_reveals_no_accounts(client, monkeypatch):
+    sign_in(client, monkeypatch, CAROL)  # Carol has an account; Dave doesn't
     sid = alices_site(client, monkeypatch)
-    invite(client, sid, "bob@example.com")
-    sign_in(client, monkeypatch, BOB)
-    sign_in(client, monkeypatch, ALICE)
-    assert client.get(f"/api/sites/{sid}/members").json()["members"][0]["status"] == "accepted"
-    # an account that has signed in before is accepted straight away
+    assert [m["status"] for m in invite(client, sid, "carol@example.com").json()["members"]] == ["pending"]
+    r = invite(client, sid, "dave@example.com")
+    assert [m["status"] for m in r.json()["members"]] == ["pending", "pending"]  # same answer either way
     sign_in(client, monkeypatch, CAROL)
     sign_in(client, monkeypatch, ALICE)
-    statuses = [m["status"] for m in invite(client, sid, "carol@example.com").json()["members"]]
-    assert statuses == ["accepted", "accepted"]
+    assert [m["status"] for m in client.get(f"/api/sites/{sid}/members").json()["members"]] == ["pending"] * 2
+
+
+def test_accept_and_decline(client, monkeypatch):
+    sid = alices_site(client, monkeypatch)
+    other = upload(client, {}).json()["site"]["id"]
+    assert client.post(f"/api/sites/{other}/slug", json={"slug": "alices-other"}).status_code == 200
+    invite(client, sid, "bob@example.com")
+    invite(client, other, "bob@example.com")
+    sign_in(client, monkeypatch, BOB)
+    listed = client.get("/api/me/invites").json()["invites"]
+    assert [(i["site_id"], i["slug"], i["owner_email"]) for i in listed] == [
+        (sid, None, "alice@example.com"),
+        (other, "alices-other", "alice@example.com"),
+    ]
+    assert set(listed[0]) == {"site_id", "site_name", "slug", "owner_email", "created_at"}
+    assert client.get("/api/me/sites").json()["sites"] == []
+
+    assert accept(client, sid, headers={"Origin": "https://evil.example"}).status_code == 403
+    r = accept(client, sid)
+    assert r.status_code == 200, r.text
+    assert (r.json()["site"]["id"], r.json()["site"]["role"]) == (sid, "member")
+    assert accept(client, sid).status_code == 404  # already accepted
+    assert client.delete(f"/api/me/invites/{other}").status_code == 200
+    assert client.delete(f"/api/me/invites/{other}").status_code == 404
+    assert client.get("/api/me/invites").json()["invites"] == []
+    assert [s["id"] for s in client.get("/api/me/sites").json()["sites"]] == [sid]
+    assert upload(client, {}, url=f"/api/sites/{sid}/versions").status_code == 200
+
+    sign_in(client, monkeypatch, ALICE)
+    assert [(m["email"], m["status"]) for m in client.get(f"/api/sites/{sid}/members").json()["members"]] == [
+        ("bob@example.com", "accepted")
+    ]
+    assert client.get(f"/api/sites/{other}/members").json()["members"] == []  # declined
+
+
+def test_only_the_invited_email_can_accept(client, monkeypatch):
+    sid = alices_site(client, monkeypatch)
+    invite(client, sid, "bob@example.com")
+    assert accept(client, sid).status_code == 404  # the owner
+    sign_in(client, monkeypatch, CAROL)
+    assert client.get("/api/me/invites").json()["invites"] == []
+    assert accept(client, sid).status_code == 404
+    assert client.delete(f"/api/me/invites/{sid}").status_code == 404
+    client.cookies.clear()
+    assert client.get("/api/me/invites").status_code == 401
+    assert accept(client, sid).status_code == 401
+
+
+def test_a_stale_session_email_cant_accept(client, monkeypatch, tmp_path):
+    sid = alices_site(client, monkeypatch)
+    invite(client, sid, "bob@example.com")
+    sign_in(client, monkeypatch, BOB)  # this cookie says bob@example.com
+    # the account's Google email changed since (recorded at its latest sign-in elsewhere)
+    db = sqlite3.connect(tmp_path / "t.db")
+    db.execute("update users set email = 'bob@new.example' where sub = '222'")
+    db.commit()
+    assert client.get("/api/me/invites").json()["invites"] == []
+    assert accept(client, sid).status_code == 404
+
+
+def test_api_token_invitee_accepts(client, monkeypatch):
+    sid = alices_site(client, monkeypatch)
+    invite(client, sid, "bob@example.com")
+    h = bearer(new_token(client, monkeypatch, BOB)["secret"])
+    client.cookies.clear()
+    assert [i["site_id"] for i in client.get("/api/me/invites", headers=h).json()["invites"]] == [sid]
+    assert accept(client, sid, headers=h).status_code == 200
+    assert [s["role"] for s in client.get("/api/me/sites", headers=h).json()["sites"]] == ["member"]
+
+
+def test_pending_invitee_gets_no_access(client, monkeypatch):
+    sid = alices_site(client, monkeypatch)
+    digest = next(iter(client.get(f"/api/sites/{sid}/versions/1/files").json()["files"].values()))
+    invite(client, sid, "bob@example.com")
+    sign_in(client, monkeypatch, BOB)
+    assert upload(client, {}, url=f"/api/sites/{sid}/versions").status_code == 403
+    assert client.post(f"/api/sites/{sid}/live", json={"version": 1}).status_code == 403
+    assert client.post(f"/api/sites/{sid}/versions/1/entry", json={"entry": "index.html"}).status_code == 403
+    assert client.get(f"/api/sites/{sid}/versions/1/files").status_code == 403
+    assert client.get(f"/api/sites/{sid}/files/{digest}").status_code == 403
+    assert client.get(f"/api/sites/{sid}/hold").status_code == 403
+    assert client.get("/api/me/sites").json()["sites"] == []
+    # a pending invitee can't "leave" (that's declining) or remove anyone
+    assert client.delete(f"/api/sites/{sid}/members/bob@example.com").status_code == 403
+
+
+def test_owner_removes_a_pending_invite(client, monkeypatch):
+    sid = alices_site(client, monkeypatch)
+    invite(client, sid, "bob@example.com")
+    assert client.delete(f"/api/sites/{sid}/members/bob@example.com").status_code == 200
+    sign_in(client, monkeypatch, BOB)
+    assert client.get("/api/me/invites").json()["invites"] == []
+
+
+def test_answers_are_rate_limited(client, monkeypatch):
+    monkeypatch.setattr(members, "ANSWERS_PER_HOUR", 1)
+    sid = alices_site(client, monkeypatch)
+    other = upload(client, {}).json()["site"]["id"]
+    invite(client, sid, "bob@example.com")
+    invite(client, other, "bob@example.com")
+    sign_in(client, monkeypatch, BOB)
+    assert accept(client, sid).status_code == 200
+    assert accept(client, other).status_code == 429
 
 
 def test_api_token_owner_manages_members(client, monkeypatch):
@@ -125,6 +231,7 @@ def shared_with_bob(client, monkeypatch):
     sid = alices_site(client, monkeypatch)
     assert invite(client, sid, "bob@example.com").status_code == 200
     sign_in(client, monkeypatch, BOB)
+    assert accept(client, sid).status_code == 200
     return sid
 
 
@@ -226,10 +333,12 @@ def test_api_token_member(client, monkeypatch):
     assert [(s["id"], s["role"]) for s in sites] == [(sid, "member")]
 
 
-def test_pending_invite_becomes_active_on_sign_in(client, monkeypatch):
+def test_invite_to_someone_who_signs_up_later(client, monkeypatch):
     sid = alices_site(client, monkeypatch)
     assert invite(client, sid, "dave@example.com").json()["members"][0]["status"] == "pending"
     sign_in(client, monkeypatch, {"sub": "444", "email": "Dave@Example.com", "name": "Dave"})
+    assert client.get("/api/me/sites").json()["sites"] == []  # nothing until Dave accepts
+    assert accept(client, sid).status_code == 200
     [site] = client.get("/api/me/sites").json()["sites"]
     assert (site["id"], site["role"], site["owner_email"]) == (sid, "member", "alice@example.com")
     assert upload(client, {}, url=f"/api/sites/{sid}/versions").status_code == 200

@@ -16,6 +16,21 @@ from .client import Client
 STATE_FILE = ".spinsite.json"
 CONCURRENCY = 8  # downloads at once
 DIGEST_RE = re.compile(r"[0-9a-f]{64}")
+# Files that coding agents load as instructions, or that build/test tools run, when someone works in the folder.
+# A pulled site may come from another member, so pull points them out ("review_before_running").
+AGENT_FILES = {"claude.md", "agents.md", "gemini.md"}  # loaded from any folder
+TOOL_FILES = {
+    "package.json",
+    "makefile",
+    "gnumakefile",
+    "justfile",
+    "conftest.py",
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "tox.ini",
+    "noxfile.py",
+}  # top level only
 
 
 class PullError(Exception):
@@ -61,13 +76,34 @@ def safe_target(root: Path, path: str) -> Path | None:
     return target
 
 
+def needs_review(paths) -> list[str]:
+    """The pulled paths an agent or a build tool would load or run on its own (see AGENT_FILES, TOOL_FILES)."""
+    out = []
+    for path in paths:
+        name = path.rsplit("/", 1)[-1].lower()
+        if name in AGENT_FILES or ("/" not in path and name in TOOL_FILES):
+            out.append(path)
+    return out
+
+
+def default_folder(site: dict) -> Path:
+    return Path(site.get("slug") or site["id"])
+
+
+def foreign_contents(folder: Path, site_id: str) -> bool:
+    """The folder has files and isn't an earlier pull of this site."""
+    if not folder.is_dir() or not any(folder.iterdir()):
+        return False
+    state = read_state(folder)
+    return not (state and state.get("site_id") == site_id)
+
+
 def _check_folder(folder: Path, site_id: str, force: bool) -> None:
     if folder.exists() and not folder.is_dir():
         raise PullError(f"{folder} exists and isn't a folder")
     if not folder.exists() or force or not any(folder.iterdir()):
         return
-    state = read_state(folder)
-    if state and state.get("site_id") == site_id:
+    if not foreign_contents(folder, site_id):
         return  # an earlier pull of the same site: update it in place
     raise PullError(f"{folder} isn't empty; pull into a new folder, or pass --force to write into it anyway")
 
@@ -80,7 +116,7 @@ async def pull(
     n = version or site.get("live")
     if not n:
         raise PullError(f"{site['name']} has no live version; pick one with --version")
-    root = Path(folder) if folder else Path(site.get("slug") or site["id"])
+    root = Path(folder) if folder else default_folder(site)
     _check_folder(root, site["id"], force)
 
     listing = await c.version_files(site["id"], n)
@@ -106,7 +142,7 @@ async def pull(
 
     # everything is downloaded before anything is written, so a failed download leaves the folder as it was
     blobs = dict(await asyncio.gather(*(fetch(d) for d in sorted({d for _, d in wanted.values()}))))
-    written = 0
+    written = []
     try:
         root.mkdir(parents=True, exist_ok=True)
         for path, (target, digest) in wanted.items():
@@ -115,7 +151,7 @@ async def pull(
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(blobs[digest])
-            written += 1
+            written.append(path)
         state = {"site_id": site["id"], "url": site.get("url"), "version": n, "entry": listing.get("entry")}
         write_state(root, state | {"server": c.base_url})
     except OSError as e:
@@ -127,8 +163,10 @@ async def pull(
         "entry": listing.get("entry"),
         "url": site.get("url"),
         "dir": str(root),
-        "files": written,
+        "files": len(written),
         "skipped": skipped,
+        # loaded by coding agents or run by build tools: written by whoever published, so read them first
+        "review_before_running": needs_review(written),
     }
 
 

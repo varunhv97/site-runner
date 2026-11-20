@@ -136,3 +136,37 @@ def test_concurrent_first_requests_migrate_once(tmp_path):
 
     run(go())
     assert sites._schema_ready
+
+
+def test_members_made_before_consent_go_back_to_pending(engine):
+    async def at(revision, sql=None):
+        def go(conn):
+            config = db.Config()
+            config.set_main_option("script_location", db.MIGRATIONS)
+            config.attributes["connection"] = conn
+            command.upgrade(config, revision)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(go)
+            if sql:
+                for stmt in sql:
+                    await conn.execute(text(stmt))
+
+    run(
+        at(
+            "0002",
+            [
+                "INSERT INTO sites (id, name, token_hash, owner, live, created_at, deleted_by_admin) "
+                "VALUES ('abc123', 'S', 'h', '111', NULL, 1, false)",
+                "INSERT INTO site_members (site_id, email, sub, invited_by, created_at) "
+                "VALUES ('abc123', 'bob@example.com', '222', '111', 1)",
+            ],
+        )
+    )
+    run(migrate(engine))
+
+    async def rows():
+        async with engine.connect() as conn:
+            return (await conn.execute(text("SELECT email, sub, accepted_at FROM site_members"))).all()
+
+    assert [tuple(r) for r in run(rows())] == [("bob@example.com", None, None)]

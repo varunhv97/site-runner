@@ -524,7 +524,7 @@ class MemberBody(BaseModel):
 
 @app.get("/api/sites/{site_id}/members")
 async def list_site_members(request: Request, site_id: str):
-    """The owner's email and the members (accepted or pending), for the owner."""
+    """The owner's email and the members (accepted, or pending: invited, not accepted yet), for the owner."""
     return await members.list_members(sites, site_id, await _current_user(request))
 
 
@@ -544,6 +544,27 @@ async def remove_site_member(request: Request, site_id: str, email: str):
     """The owner removes a member, or a member leaves."""
     _check_origin(request)
     await members.remove(sites, site_id, email, await _current_user(request))
+    return {"ok": True}
+
+
+@app.get("/api/me/invites")
+async def my_invites(request: Request):
+    """Invitations to other people's sites waiting for this account's answer. They grant nothing until accepted."""
+    return {"invites": await members.my_invites(sites, await _current_user(request))}
+
+
+@app.post("/api/me/invites/{site_id}/accept")
+async def accept_invite(request: Request, site_id: str):
+    """Become a member of the site (publish, make live, pull). The invitee's decision only."""
+    _check_origin(request)
+    site = await members.accept(sites, site_id, await _current_user(request))
+    return {"site": site | {"url": _share_url(request, _ref(site))}}
+
+
+@app.delete("/api/me/invites/{site_id}")
+async def decline_invite(request: Request, site_id: str):
+    _check_origin(request)
+    await members.decline(sites, site_id, await _current_user(request))
     return {"ok": True}
 
 

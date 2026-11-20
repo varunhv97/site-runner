@@ -87,7 +87,7 @@ slugs = Table(
 )
 
 # Collaborators (_core/members.py): accounts the owner invited by Google email to publish to and pull from a site.
-# sub is filled in once an account with that verified email is known (signs in); until then the invite is pending.
+# Pending (no access) until the invitee accepts; accepting fills sub and accepted_at.
 site_members = Table(
     "site_members",
     metadata,
@@ -96,6 +96,7 @@ site_members = Table(
     Column("sub", String(255), nullable=True),
     Column("invited_by", String(255), nullable=False),  # the owner's sub
     Column("created_at", Integer, nullable=False),
+    Column("accepted_at", Integer, nullable=True),  # None = pending: grants nothing
     ForeignKeyConstraint(["site_id"], ["sites.id"], ondelete="CASCADE"),
     Index("ix_site_members_email", "email"),
     Index("ix_site_members_sub", "sub"),

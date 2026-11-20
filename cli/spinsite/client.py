@@ -68,18 +68,46 @@ class Client:
         return await self._call("GET", "/api/me/usage")
 
     async def find_site(self, ref: str) -> dict:
-        """One of the account's sites by id, link name or (when unique) display name."""
+        """One of the account's sites. The account's own sites first: by id, then link name, then (when unique)
+        display name. Sites shared with it only by exact id or link name, never by display name, so someone who
+        invites you can't name a site like yours and catch your deploys; a ref matching both is your own site."""
         sites = await self.sites()
         ref_l = ref.strip().lower()
-        for s in sites:
-            if s["id"] == ref or (s.get("slug") or "") == ref_l:
-                return s
-        named = [s for s in sites if s["name"].lower() == ref_l]
+        owned = [s for s in sites if s.get("role", "owner") == "owner"]
+        shared = [s for s in sites if s.get("role", "owner") != "owner"]
+        for match in (lambda s: s["id"] == ref, lambda s: (s.get("slug") or "") == ref_l):
+            if found := next((s for s in owned if match(s)), None):
+                return found
+        named = [s for s in owned if s["name"].lower() == ref_l]
         if len(named) == 1:
             return named[0]
         if named:
             raise ApiError(f'several of your sites are called "{ref}"; use its id or link name', 409)
+        for s in shared:
+            if s["id"] == ref or (s.get("slug") or "") == ref_l:
+                return s
+        if any(s["name"].lower() == ref_l for s in shared):
+            raise ApiError(f'"{ref}" is the name of a site shared with you: use its id or link name', 404)
         raise ApiError(f'no site "{ref}" in your account', 404)
+
+    # ---- invitations (to other people's sites; nothing is shared until accepted) ----
+
+    async def invites(self) -> list[dict]:
+        return (await self._call("GET", "/api/me/invites"))["invites"]
+
+    async def find_invite(self, ref: str) -> dict:
+        """A pending invitation by the site's id or link name, as listed by invites()."""
+        ref_l = ref.strip().lower()
+        for i in await self.invites():
+            if i["site_id"] == ref.strip() or (i.get("slug") or "") == ref_l:
+                return i
+        raise ApiError(f'no invitation to "{ref}"; `spinsite invites` lists them (use the site id or link name)', 404)
+
+    async def accept_invite(self, site_id: str) -> dict:
+        return (await self._call("POST", f"/api/me/invites/{quote(site_id, safe='')}/accept"))["site"]
+
+    async def decline_invite(self, site_id: str) -> None:
+        await self._call("DELETE", f"/api/me/invites/{quote(site_id, safe='')}")
 
     # ---- publishing ----
 

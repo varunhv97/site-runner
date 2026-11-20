@@ -265,17 +265,6 @@ class Sites:
         stmt = self._upsert(users).values(sub=user["sub"], email=user.get("email", ""), created_at=int(time.time()))
         async with self.engine.begin() as conn:
             await conn.execute(stmt.on_conflict_do_update(index_elements=["sub"], set_={"email": stmt.excluded.email}))
-            await self._accept_invites(conn, user)
-
-    async def _accept_invites(self, conn, user: dict) -> None:
-        """Pending invites (site_members) to this account's verified Google email become its own."""
-        email = (user.get("email") or "").strip().lower()
-        if email:
-            await conn.execute(
-                update(site_members)
-                .where(site_members.c.email == email, site_members.c.sub.is_(None))
-                .values(sub=user["sub"])
-            )
 
     async def _count_upload(self, conn, key: str | None) -> None:
         """Atomically count an upload against today's limit. key: a user's sub, or "site:<id>" for an
@@ -381,8 +370,7 @@ class Sites:
         """The account's sites (role "owner") and then the sites it is a member of (role "member")."""
         await self._ready()
         sub = user["sub"]
-        async with self.engine.begin() as conn:
-            await self._accept_invites(conn, user)  # an invite to this email may have arrived since it signed in
+        async with self.engine.connect() as conn:
             live = sites.c.deleted_at.is_(None)
             owned = select(sites.c.id).where(sites.c.owner == sub, live).order_by(sites.c.created_at)
             shared = (
@@ -394,11 +382,15 @@ class Sites:
             out = []
             for role, q in (("owner", owned), ("member", shared)):
                 for site_id in list((await conn.execute(q)).scalars()):
-                    owner = select(users.c.email).select_from(sites.join(users, users.c.sub == sites.c.owner))
-                    owner_email = (await conn.execute(owner.where(sites.c.id == site_id))).scalar()
-                    meta = await self.public_meta(site_id, conn, publishers=True)
-                    out.append(meta | {"role": role, "owner_email": owner_email})
+                    out.append(await self.user_site(conn, site_id, role))
             return out
+
+    async def user_site(self, conn, site_id: str, role: str) -> dict:
+        """One entry of user_sites: the site, its versions with publishers, the role and the owner's email."""
+        owner = select(users.c.email).select_from(sites.join(users, users.c.sub == sites.c.owner))
+        owner_email = (await conn.execute(owner.where(sites.c.id == site_id))).scalar()
+        meta = await self.public_meta(site_id, conn, publishers=True)
+        return meta | {"role": role, "owner_email": owner_email}
 
     async def resolve(self, ref: str, n: int | None, slugs: bool = True) -> dict:
         """The version to serve for a random id or link name: version n, or the live one. 404 when none,
@@ -449,10 +441,8 @@ class Sites:
 
     @staticmethod
     def _member_of(user: dict):
-        """site_members rows that are this account's: its sub, or a pending invite to its verified email."""
-        email = (user.get("email") or "").strip().lower()
-        cond = site_members.c.sub == user["sub"]
-        return or_(cond, and_(site_members.c.sub.is_(None), site_members.c.email == email)) if email else cond
+        """site_members rows that make this account a member: invites it accepted. A pending invite grants nothing."""
+        return and_(site_members.c.sub == user["sub"], site_members.c.accepted_at.is_not(None))
 
     async def can_edit(self, conn, site, user: dict | None) -> bool:
         """The site's owner or one of its members (site_members): they may publish, make a version live, change

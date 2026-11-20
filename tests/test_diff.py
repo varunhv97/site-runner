@@ -43,6 +43,7 @@ def test_diff_with_a_pulled_folder(two, tmp_path):
     ok(invoke("invite", "team", "bob@example.com"))
 
     as_bob()  # a member can diff too
+    ok(invoke("accept", "team"))
     ok(invoke("pull", "team", "work"))
     (tmp_path / "work/index.html").write_text("hello there\n")
     (tmp_path / "work/old.html").unlink()
