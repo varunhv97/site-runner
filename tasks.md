@@ -85,6 +85,9 @@ Owner invites other accounts to publish to and pull from a site. Latest publish 
 - [x] `spinsite diff` + MCP `diff` (versions, or a version vs a local folder); `tests/test_diff.py`
 - [x] Security review fixes: invite consent, find_site precedence, MCP untrusted content, lock_timeout
   (+ admin sees each version's publisher)
+- [x] One-time invite links (2026-11-23): `invite_links` (migration 0004), owner create/list/revoke, lookup/redeem
+  (single use, generic 404, seats count links), `/join` page, members panel, CLI `invite-link(s)`/`revoke-link`;
+  `tests/test_invite_links.py`, `tests/js/joinCode.test.mjs`; headless-Chrome run of owner → /join → Join → reuse
 - [ ] Follow-ups: re-pull into a folder doesn't delete files the newer version removed; leaving after the owner
   already removed you is 403 not 404 (UI copes); 409 body could include the live version
 

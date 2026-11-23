@@ -14,14 +14,13 @@ spinsite.app (app origin: cookies, IndexedDB with edit tokens; never runs user H
 p-<local id>.<UC>        one local preview: /__sr/boot + /__sr/sw.js from the server, the rest from the worker
 api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path rules) · preview/*.js (boot, worker)
            sites.py (zips, versions, limits) · db.py (Postgres | SQLite; migrations/) · storage.py (Blob | .data/)
-           members.py (collaborators)
+           members.py (collaborators) · invite_links.py (one-time join links)
            abuse.py (reports, bans, rate limit) · scan.py (executables; phishing/seed/miner) · holds.py (451 until reviewed)
 ```
 `<UC>` = `USERCONTENT_BASE_DOMAIN` (`sites.spinsite.app`; dev `usercontent.localhost:8001`).
 
 ## Landing page
-- Taste-skill build (kit in `public/assets`; split hero, gradient mesh, pinned chapters, forest-pale-lime, Gabarito +
-  Figtree + DM Mono). `/` rewrites to `/index.html`; /app reuses the tokens. Check: `node <skill>/scripts/gate.mjs`.
+- Taste-skill build (kit in `public/assets`); `/` rewrites to `/index.html`; /app reuses the tokens.
 
 ## Origins and routing
 - `HostRouter` (api/index.py) dispatches by the Host header only (never X-Forwarded-Host). Hosts under `<UC>` reach
@@ -36,7 +35,6 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
   names on http dev. `_check_origin` requires Origin == PUBLIC_BASE_URL exactly, so site subdomains are refused.
 - Dev: `next.config.ts` rewrites `/api/*`, `/s/*` and `/r/*` → `127.0.0.1:8000`; `npm run dev:uc` serves `<UC>` on
   :8001. There's an explicit trailing-slash rule because `:path*` drops it.
-- Python deps: Vercel reads `pyproject.toml` `[project].dependencies` (not requirements.txt) when it exists. Keep both in sync.
 - Prod: `www.spinsite.app` 308s to `spinsite.app` (one origin for cookies, IndexedDB and sign-in). The old
   `spinsite.vercel.app` redirects `/`, `/s/`, `/r/` and sign-in; its `/app` stays so local sites remain reachable.
   `vercel.json` rewrites `/api/*`, `/s/*` and `/r/*` → `api/index.py`. `api/_core` is underscore-prefixed so
@@ -61,7 +59,8 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
 - `client.py` async httpx with an account API token; `bundle.py` zips a folder (skips hidden files and symlinks,
   checks the server's limits first); `config.py` saves url + token in `~/.config/spinsite/config.json` (0600),
   `SPINSITE_TOKEN`/`SPINSITE_URL` override. Commands: login, logout, whoami, usage, sites, versions, deploy, live,
-  rename, rm, pull, diff, members, invite, remove-member, invites, accept, decline; all take `--json`. Uses existing routes only.
+  rename, rm, pull, diff, members, invite, remove-member, invites, accept, decline, invite-link, invite-links,
+  revoke-link; all take `--json`. Uses existing routes only.
 - `pull.py`: downloads a version (sha256-checked, 8 at a time) into a folder, skipping hidden/absolute/`..`/escaping
   paths; writes `.spinsite.json` (site, version, entry, server), which `deploy` uses as its target and base.
 - `diff.py`: two versions, or a version and a folder (deploy's file rules); compares digests, downloads only changed
@@ -111,6 +110,15 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
   list (Accept / Decline); a member's local copy has `remote` without a token and publishes with the session.
 - `find_site` (CLI/MCP): own sites by id, link name, then unique display name; member sites only by id or link name;
   own wins. So an inviter can't name a site like yours to catch `deploy --site <name>`.
+- Invite links (`invite_links`: site, token_hash, created_by, expires_at = +1h, used_at/by, revoked_at): owner-only
+  `POST/GET /api/sites/<id>/invite-links`, `DELETE …/<link_id>` → `{link, url}` once (`<PUBLIC_BASE_URL>/join#srj_…`,
+  256-bit code, sha256 stored; 30/hour). Unused unexpired links take a seat (`members.seats_used` ≤ 10). Signed-in
+  `POST /api/invite-links/lookup|redeem {code}` (body, never URL; 20/hour per account and per IP; one generic 404
+  for unknown/used/revoked/expired/unpublished). Redeem: owner 400, member 409, ban 403 (link stays unused), else a
+  guarded `UPDATE … WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at > now` (rowcount 1) and the member row
+  (a pending invite for the account's email converts) in one transaction with the site row locked. `/join`
+  (`lib/joinCode.ts`) drops the fragment via replaceState, keeps the code in sessionStorage across sign-in
+  (`next=/join`), `Referrer-Policy: no-referrer`. Never an MCP tool (a link is a bearer credential).
 - MCP: tool descriptions mark names, notes, paths, diffs and pulled files as untrusted data; `list_invites` only (no
   accept tool); `pull` refuses a non-empty folder that isn't a pull of that site even with force. `pull` lists
   auto-loaded files (CLAUDE.md, AGENTS.md, package.json, Makefile, conftest.py…) in `review_before_running`.
@@ -134,8 +142,7 @@ api/_core: hosts.py (origins, Host → label) · content.py · paths.py (path ru
 3. Boot accepts files only from the app origin + parent/opener, writes them and a manifest to Cache Storage,
    acks `loaded`, drops `window.opener`, `location.replace("/")`. The worker serves `/…` with the shared path
    rules and the sandbox headers; `/__sr/*` always goes to the network.
-4. New tab = `window.open(boot)`, same hand-off. No "ready" in 8 s (Safari may block framed workers) → offer a new tab.
-5. public/sw.js only unregisters itself; /app removes old registrations and `sr-site-data:*` keys.
+4. New tab = `window.open(boot)`, same hand-off; no "ready" in 8 s → offer a new tab. public/sw.js only unregisters.
 
 ## Upload safety
 - `scan.py` runs in `Upload()`: executables → 400 (extensions in `lib/blocked-files.json`, mirrored in Python and
