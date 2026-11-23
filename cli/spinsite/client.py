@@ -154,3 +154,15 @@ class Client:
 
     async def remove_member(self, site_id: str, email: str) -> None:
         await self._call("DELETE", f"/api/sites/{site_id}/members/{quote(email.strip(), safe='')}")
+
+    # ---- invite links (owner; one-time, an hour). Deliberately not MCP tools: a link is a credential ----
+
+    async def create_invite_link(self, site_id: str) -> dict:
+        """{link: {id, created_at, expires_at}, url}: the url (with the code) is shown this once."""
+        return await self._call("POST", f"/api/sites/{site_id}/invite-links")
+
+    async def invite_links(self, site_id: str) -> dict:
+        return await self._call("GET", f"/api/sites/{site_id}/invite-links")
+
+    async def revoke_invite_link(self, site_id: str, link_id: str) -> None:
+        await self._call("DELETE", f"/api/sites/{site_id}/invite-links/{quote(link_id.strip(), safe='')}")

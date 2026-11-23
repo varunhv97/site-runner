@@ -308,3 +308,28 @@ def test_pull_points_out_files_agents_and_tools_load(two, tmp_path):
     r = ok(invoke("pull", "team", "--json"))
     assert json.loads(r.stdout)["review_before_running"] == ["CLAUDE.md", "package.json", "sub/AGENTS.md"]
     assert "CLAUDE.md, package.json, sub/AGENTS.md" in r.stderr
+
+
+def test_invite_link_commands(two, tmp_path, client, monkeypatch):
+    invoke, as_alice, as_bob = two
+    as_alice()
+    sid = shared_site(invoke, tmp_path)
+    r = ok(invoke("invite-link", "team"))
+    url = r.output.splitlines()[0]
+    assert url.startswith("http://testserver/join#srj_") and "works once" in r.output
+    made = json.loads(ok(invoke("invite-link", "team", "--json")).output)
+    assert set(made) == {"link", "url"} and set(made["link"]) == {"id", "created_at", "expires_at"}
+    assert "(+2 unused invite links)" in ok(invoke("members", "team")).output
+
+    listed = ok(invoke("invite-links", "team")).output
+    assert made["link"]["id"] in listed and "expires in 60 min" in listed and "srj_" not in listed
+    assert "Revoked" in ok(invoke("revoke-link", "team", made["link"]["id"])).output
+    assert "no such invite link" in invoke("revoke-link", "team", made["link"]["id"]).output
+
+    sign_in(client, monkeypatch, BOB)  # Bob opens the link in the browser
+    assert client.post("/api/invite-links/redeem", json={"code": url.split("#", 1)[1]}).status_code == 200
+    client.cookies.clear()
+    assert "used by bob@example.com" in ok(invoke("invite-links", "team")).output
+    assert json.loads(ok(invoke("invite-links", "team", "--json")).output)["links"] == []
+    as_bob()
+    assert "only the site's owner" in invoke("invite-link", sid).output

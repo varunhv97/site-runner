@@ -64,6 +64,7 @@ def test_tools_are_listed_with_hints():
         "diff",
         "list_invites",
     }
+    assert not any("link" in name for name in tools)  # invite links are credentials: never minted by an agent
     assert tools["list_sites"].annotations.read_only_hint
     assert tools["unpublish_site"].annotations.destructive_hint and tools["delete_version"].annotations.destructive_hint
     assert not tools["deploy"].annotations.destructive_hint

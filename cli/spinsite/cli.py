@@ -331,7 +331,9 @@ def _members_text(body: dict) -> str:
         f"{m['status']:<8} {m['email']}" + ("  (invited, hasn't accepted yet)" if m["status"] == "pending" else "")
         for m in body["members"]
     ]
-    return "\n".join(lines) + f"\n{len(body['members'])} of {body['max_members']} members"
+    links = body.get("invite_links") or 0
+    extra = f" (+{links} unused invite link{'s' if links != 1 else ''})" if links else ""
+    return "\n".join(lines) + f"\n{len(body['members'])} of {body['max_members']} members{extra}"
 
 
 @app.command()
@@ -382,6 +384,60 @@ def remove_member(
     out(
         as_json, {"ok": True, "site_id": s["id"], "removed": email.strip().lower()}, f"Removed {email} from {s['name']}"
     )
+
+
+# ---- invite links (not in MCP: a link is a credential that only the owner should hand out) ----
+
+
+def _minutes_left(expires_at: int) -> str:
+    return f"{max(0, round((expires_at - time.time()) / 60))} min"
+
+
+@app.command("invite-link")
+def invite_link(site: Annotated[str, typer.Argument(help="Site id, link name or name.")], as_json: JsonOpt = False):
+    """Make a one-time link to join one of your sites. Anyone signed in who opens it within an hour can join, once.
+    It's shown only now and takes a member seat until it's used, revoked or expired."""
+
+    async def go(c: Client):
+        return await c.create_invite_link((await c.find_site(site))["id"])
+
+    body = run(go)
+    out(
+        as_json,
+        body,
+        f"{body['url']}\nExpires {_when(body['link']['expires_at'])} (in 1 hour) · works once. "
+        f"Send it only to the person you're inviting. Revoke: spinsite revoke-link {site} {body['link']['id']}",
+    )
+
+
+@app.command("invite-links")
+def invite_links(site: Annotated[str, typer.Argument(help="Site id, link name or name.")], as_json: JsonOpt = False):
+    """Unused invite links of one of your sites (never the links themselves), and ones used in the last week."""
+
+    async def go(c: Client):
+        return await c.invite_links((await c.find_site(site))["id"])
+
+    body = run(go)
+    lines = [f"{x['id']}  unused, expires in {_minutes_left(x['expires_at'])}" for x in body["links"]]
+    lines += [f"{x['id']}  used by {x.get('used_by_email') or '?'} at {_when(x['used_at'])}" for x in body["used"]]
+    out(as_json, body, "\n".join(lines) if lines else "No invite links.")
+
+
+@app.command("revoke-link")
+def revoke_link(
+    site: Annotated[str, typer.Argument(help="Site id, link name or name.")],
+    link_id: Annotated[str, typer.Argument(help="The link's id (see `spinsite invite-links`).")],
+    as_json: JsonOpt = False,
+):
+    """Revoke an unused invite link: it stops working and frees its member seat."""
+
+    async def go(c: Client):
+        s = await c.find_site(site)
+        await c.revoke_invite_link(s["id"], link_id)
+        return s
+
+    s = run(go)
+    out(as_json, {"ok": True, "site_id": s["id"], "revoked": link_id}, f"Revoked invite link {link_id} of {s['name']}")
 
 
 # ---- invitations to other people's sites ----
