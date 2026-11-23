@@ -277,6 +277,7 @@ def test_unpublished_site(client, monkeypatch):
 
 def test_tries_are_rate_limited_per_account_and_ip(client, monkeypatch):
     monkeypatch.setattr(invite_links, "TRIES_PER_HOUR", 3)
+    monkeypatch.setattr(invite_links, "IP_TRIES_PER_HOUR", 5)
     sid = alices_site(client, monkeypatch)
     code = new_link(client, sid)
     sign_in(client, monkeypatch, BOB)
@@ -284,8 +285,10 @@ def test_tries_are_rate_limited_per_account_and_ip(client, monkeypatch):
         assert lookup(client, "srj_guess").status_code == 404
     assert lookup(client, code).status_code == 429  # failed tries count
     assert redeem(client, code).status_code == 429
-    sign_in(client, monkeypatch, CAROL)  # another account, same IP
-    assert lookup(client, code).status_code == 429
+    sign_in(client, monkeypatch, CAROL)  # another account on the same IP isn't locked out by Bob's account limit
+    assert lookup(client, code).status_code == 200  # the IP's 4th and 5th tries (refused tries never reached it)
+    assert lookup(client, code).status_code == 200
+    assert lookup(client, code).status_code == 429  # but the IP's own, higher limit still holds
     monkeypatch.setattr(server, "_client_ip", lambda request: "203.0.113.9")
     assert redeem(client, code).status_code == 200
 

@@ -47,7 +47,7 @@ export default function JoinInvite() {
       try {
         show({ step: "ask", info: await lookupInviteLink(found) });
       } catch (e) {
-        if (isInvalidLink(e)) clearCode(storage());
+        clearCode(storage()); // every outcome here is final: opening the link again starts over
         show(isInvalidLink(e) ? { step: "invalid" } : { step: "error", message: message(e) });
       }
     })();
@@ -64,10 +64,8 @@ export default function JoinInvite() {
       clearCode(storage());
       router.replace("/app");
     } catch (e) {
-      if (isInvalidLink(e)) {
-        clearCode(storage());
-        setState({ step: "invalid" });
-      } else setState({ step: "error", message: message(e) });
+      clearCode(storage());
+      setState(isInvalidLink(e) ? { step: "invalid" } : { step: "error", message: message(e) });
     }
   };
 

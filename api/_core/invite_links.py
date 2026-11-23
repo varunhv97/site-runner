@@ -27,6 +27,7 @@ CREATES_PER_HOUR = 30
 # Lookups plus redeems per hour, per account and per client IP: codes can't be guessed (256 bits), and this keeps
 # anyone from trying.
 TRIES_PER_HOUR = 20
+IP_TRIES_PER_HOUR = 200  # higher: an office or carrier NAT shares one address, and one account mustn't lock it out
 # How far back the owner's list shows links that were used.
 RECENT_USED = 7 * 24 * 3600
 INVALID = "This invite link is invalid, expired or already used."
@@ -116,7 +117,7 @@ async def _count_try(sites, user: dict | None, ip: str) -> None:
     async with sites.engine.begin() as conn:  # committed on its own, so failed tries count
         message = "Too many invite link tries this hour. Try again later."
         await _hit_rate_limit(sites, conn, f"join:{user['sub']}", TRIES_PER_HOUR, message)
-        await _hit_rate_limit(sites, conn, f"join-ip:{ip}", TRIES_PER_HOUR, message)
+        await _hit_rate_limit(sites, conn, f"join-ip:{ip}", IP_TRIES_PER_HOUR, message)
 
 
 async def _find(conn, code: str, now: int):
