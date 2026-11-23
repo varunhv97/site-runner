@@ -14,6 +14,8 @@ ready you can share the one you pick.
   version you choose, and pinned links (`/s/my-site@3/`) that always show one version.
 - **Roll back in one click.** Point the live link at any earlier version. Visitors see it on their next load.
 - **Pick a link name.** `spinsite.app/s/my-site/` instead of a random id. Old names keep working after a rename.
+- **Work together.** Invite up to 10 people by Google email, or send a one-time invite link (it works for an
+  hour, once; signing in with Google creates their account). Members publish and roll back; the last publish wins.
 - **Sites that remember things.** Each shared site runs on its own address, so it can use `localStorage`,
   IndexedDB and cookies: a course remembers your progress or a game your high score, in each visitor's browser.
 

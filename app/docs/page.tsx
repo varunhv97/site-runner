@@ -23,6 +23,7 @@ const COMMANDS: [string, string][] = [
   ["spinsite diff my-site --from 3", "What changed from v3 to live (--to 5), or with --folder ./my-site before a deploy."],
   ["spinsite members · invite · remove-member", "See, add or remove who can publish to your site."],
   ["spinsite invites · accept · decline", "Invitations to other people's sites; nothing is shared until you accept."],
+  ["spinsite invite-link · invite-links · revoke-link", "Make a one-time invite link (an hour, once), list or revoke them."],
   ["spinsite usage", "Storage your shared sites use, against your 250MB."],
   ["spinsite whoami · logout", "Which account you're logged in as; forget the saved token."],
 ];
@@ -193,6 +194,14 @@ spinsite accept my-site                    # sam: joins (or: spinsite decline my
 spinsite pull my-site                      # sam: downloads the live version into ./my-site
 spinsite deploy my-site                    # sam: publishes it back as the new live version`}
         />
+        <p>
+          Or send an <strong>invite link</strong>: <em>Create invite link</em> in the Members panel (or{" "}
+          <code>spinsite invite-link my-site</code>). It works for one hour and only once: whoever opens it sees whose
+          site it is and joins with a <em>Join</em> button. Signing in with Google there creates their Site Runner
+          account if they don&apos;t have one. An unused link takes a member seat until it expires or you revoke it.
+          Send it only to the person you mean, since anyone holding it can join. There&apos;s no MCP tool for it: an
+          agent can&apos;t make or see invite links.
+        </p>
         <p>
           A pulled folder remembers its site and version in a hidden <code>.spinsite.json</code> (never uploaded), so{" "}
           <code>deploy</code> needs no <code>--site</code>.
