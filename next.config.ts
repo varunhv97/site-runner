@@ -33,7 +33,11 @@ const nextConfig: NextConfig = {
   // /s/<ref>/ links keep their slash on the way to the API, which redirects them to the site's own host.
   skipTrailingSlashRedirect: true,
   async headers() {
-    return [{ source: "/:path*", headers: [{ key: "Content-Security-Policy", value: csp }] }];
+    return [
+      { source: "/:path*", headers: [{ key: "Content-Security-Policy", value: csp }] },
+      // /join#<invite code>: the code is in the fragment (never sent anyway); still, this page sends no Referer
+      { source: "/join", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
+    ];
   },
   // In dev, proxy to the local FastAPI server. In prod, vercel.json routes these to api/index.py.
   // Shared sites and previews are not proxied: they live on *.usercontent.localhost:8001 (npm run dev:uc).

@@ -429,3 +429,28 @@ export async function createApiToken(name: string): Promise<{ token: ApiToken; s
 export async function revokeApiToken(id: string): Promise<void> {
   await call(`/api/me/tokens/${id}`, { method: "DELETE" });
 }
+
+/** One-time invite links (owner). The url, with the code in its #fragment, comes back only from create. */
+export type InviteLink = { id: string; created_at: number; expires_at: number };
+export type UsedInviteLink = { id: string; created_at: number; used_at: number; used_by_email: string | null };
+export type InviteLinks = { links: InviteLink[]; used: UsedInviteLink[] };
+
+export const fetchInviteLinks = (siteId: string) => call<InviteLinks>(`/api/sites/${siteId}/invite-links`, {});
+
+export const createInviteLink = (siteId: string) =>
+  call<{ link: InviteLink; url: string }>(`/api/sites/${siteId}/invite-links`, { method: "POST" });
+
+export async function revokeInviteLink(siteId: string, id: string): Promise<void> {
+  await call(`/api/sites/${siteId}/invite-links/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+/** /join: what a code is for, then joining with it. The code goes in the POST body, never in a URL. 404 = the generic
+ * "invalid, expired or already used" (see isInvalidLink). */
+export type InviteLinkInfo = { site_name: string; owner_email: string | null; expires_at: number };
+
+const postCode = <T>(url: string, code: string) =>
+  call<T>(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+
+export const lookupInviteLink = (code: string) => postCode<InviteLinkInfo>("/api/invite-links/lookup", code);
+export const redeemInviteLink = (code: string) => postCode<{ site: AccountSite }>("/api/invite-links/redeem", code);
+export const isInvalidLink = (e: unknown) => isGone(e);
