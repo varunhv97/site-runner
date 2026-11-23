@@ -246,3 +246,7 @@ main.narrow { max-width: 680px; }
 .panel.join h2 { line-height: 1.3; overflow-wrap: anywhere; }
 .join-who, .join-site { color: var(--accent); }
 .join-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.invite-links { display: grid; gap: 10px; justify-items: start; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.invite-links > p { margin: 0; font-size: 14px; }
+.invite-links ul { width: 100%; margin: 0; }
+.invite-links .api-token-secret { width: 100%; margin-top: 0; }

@@ -377,7 +377,13 @@ export async function declineInvite(siteId: string): Promise<void> {
 
 /** A site's owner and members (owner only). status "pending": invited, hasn't accepted yet. */
 export type Member = { email: string; status: "pending" | "accepted"; created_at: number };
-export type Members = { owner: { email: string | null }; members: Member[]; max_members: number };
+/** invite_links: unused invite links, which take a seat (members + links ≤ max_members). */
+export type Members = {
+  owner: { email: string | null };
+  members: Member[];
+  max_members: number;
+  invite_links?: number;
+};
 
 export const fetchMembers = (siteId: string) => call<Members>(`/api/sites/${siteId}/members`, {});
 
